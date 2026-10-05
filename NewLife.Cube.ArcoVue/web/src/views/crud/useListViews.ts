@@ -3,7 +3,6 @@ import { Message } from '@arco-design/web-vue';
 import cubeApi from '@/api';
 import { formatApiError } from '@/core/utils/apiError';
 import {
-  buildSortsPayload,
   emptyViewFilter,
   serializeNamedView,
   type ColumnPref,
@@ -56,8 +55,6 @@ export function useListViews(ctx: ListContext, deps: ListViewsDeps) {
     metaKeys,
     searchTouched,
     baseSearch,
-    activeSorts,
-    effectivePageSize,
     effectivePageSizePref,
     pagination,
     selectedKeys,
@@ -73,7 +70,6 @@ export function useListViews(ctx: ListContext, deps: ListViewsDeps) {
     localFormat,
     activeViewId,
     drawerMode,
-    tableDataRaw,
     searchForm,
     evpStore,
     measureTableHeight,
@@ -257,8 +253,6 @@ export function useListViews(ctx: ListContext, deps: ListViewsDeps) {
 
   function onSwitchView(id: string) {
     const wasTouched = searchTouched.value;
-    const oldSort = JSON.stringify(buildSortsPayload(activeSorts.value));
-    const oldPageSize = effectivePageSize.value;
     evpStore.switchView(typePath.value, id);
     syncLocalState();
     selectedKeys.value = [];
@@ -278,12 +272,9 @@ export function useListViews(ctx: ListContext, deps: ListViewsDeps) {
     // 切换视图后重新计算条件来源并回填表单（OSC-0012）
     searchTouched.value = false;
     applySearchToForm(baseSearch.value);
-    // 重绘优化：未显式搜索、且新视图加载量与排序与已加载数据一致时，复用数据避免重复请求后端
-    const canReuse =
-      !wasTouched &&
-      effectivePageSize.value === oldPageSize &&
-      JSON.stringify(buildSortsPayload(activeSorts.value)) === oldSort &&
-      tableDataRaw.value.length > 0;
+    // 重绘优化（2026-10-05 性能修复）：未显式搜索时允许复用 —— loadData 内按完整请求签名查缓存
+    // （含历史视图结果），命中零请求、未命中自动回源；不再要求分页/排序与上次视图一致
+    const canReuse = !wasTouched;
     loadData(canReuse);
   }
 

@@ -7,7 +7,7 @@
  * - 逐层加载（地区实体）：检测到数值层级字段时，按缩放只拉取/绘制所需层级（省→市→区县→街道）
  * - 悬停卡片：150ms 显示 / 80ms 隐藏延迟；点击点位回调详情
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue';
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch, type Ref } from 'vue';
 import { useAppStore } from '@/stores/app';
 import type { FieldMeta } from '@/core/types/field';
 import { detectCoordinateFields, type CoordDetection } from '@/core/utils/mapCoord';
@@ -175,6 +175,10 @@ export function useMapView(opts: UseMapViewOptions) {
   let nextPage = 1;
   let disposed = false;
   let fitted = false;
+  /** 保活暂停（KeepAlive deactivated）：暂停绘制与数据刷新 */
+  let suspended = false;
+  /** 暂停期间有数据变化：激活时统一重建管线 */
+  let pendingRefresh = false;
 
   let viewportTimer = 0;
   let pumpHandle = 0;
@@ -191,6 +195,12 @@ export function useMapView(opts: UseMapViewOptions) {
   /** 当前是否暗色主题 */
   function isDarkTheme(): boolean {
     return typeof document !== 'undefined' && document.body?.getAttribute('arco-theme') === 'dark';
+  }
+
+  /** 地图配置指纹（服务商/密钥/脚本地址）：保活激活时静默比对配置是否变更 */
+  function mapConfigKey(): string {
+    const cfg = appStore.mapConfig;
+    return `${cfg.provider ?? ''}|${cfg.key}|${cfg.scriptUrl}`;
   }
 
   /** 比例尺：按中心纬度与缩放算“目标宽度对应的整距离”，条宽取整到 1/2/5 序列 */
@@ -439,7 +449,7 @@ export function useMapView(opts: UseMapViewOptions) {
   }
 
   function schedulePump() {
-    if (pumpHandle || disposed || !ready.value) return;
+    if (pumpHandle || disposed || suspended || !ready.value) return;
     pumpHandle = window.requestAnimationFrame(pumpStep);
   }
 
@@ -914,6 +924,11 @@ export function useMapView(opts: UseMapViewOptions) {
   /** records/mapping 变化：适配源（服务商/桩）变化则重建，否则仅重置数据管线 */
   async function refresh() {
     if (!mounted) return;
+    // 保活暂停（KeepAlive）：deactivated 期间合并刷新请求，激活后统一重建，避免对隐藏容器绘制
+    if (suspended) {
+      pendingRefresh = true;
+      return;
+    }
     if (sourceOf() !== adapterSource) {
       await buildAdapter();
       return;
@@ -994,6 +1009,42 @@ export function useMapView(opts: UseMapViewOptions) {
     observer?.disconnect();
     observer = null;
     destroy();
+  });
+
+  // 视图区保活（2026-10-05 性能修复）：切走时暂停数据管线与绘制，保留 SDK 实例与已加载数据；
+  // 切回时若期间数据有变化统一重建，否则直接补绘，避免重建实例与重复请求
+  onDeactivated(() => {
+    suspended = true;
+    hoveredId = null;
+    hover.value = null;
+    if (pumpHandle) {
+      window.cancelAnimationFrame(pumpHandle);
+      pumpHandle = 0;
+    }
+  });
+
+  onActivated(() => {
+    suspended = false;
+    measureHeight();
+    const el = opts.container.value;
+    if (el && (size.value.w !== el.clientWidth || size.value.h !== el.clientHeight)) {
+      size.value = { w: el.clientWidth, h: el.clientHeight };
+      // 容器尺寸变化（窗口在其它视图期间调整等）：通知 SDK 重排（各端 resizeEnable 机制）
+      window.dispatchEvent(new Event('resize'));
+    }
+    // 保持原「进入地图即刷新配置」语义（OSC-261004d7f4）：静默比对，配置变更才重建适配器，不阻塞呈现
+    const before = mapConfigKey();
+    void appStore.fetchMapConfig(true).then(() => {
+      if (disposed || suspended) return;
+      if (mapConfigKey() !== before) void buildAdapter();
+    });
+    if (pendingRefresh) {
+      pendingRefresh = false;
+      void refresh();
+      return;
+    }
+    schedulePump();
+    void syncLevels();
   });
 
   watch(

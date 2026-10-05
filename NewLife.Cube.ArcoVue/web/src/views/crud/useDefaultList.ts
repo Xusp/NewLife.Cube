@@ -59,6 +59,7 @@ export function useDefaultList(props: { type: string; authId?: number }) {
   const nav = useRecordNav(ctx);
   const crud = useListCrud(ctx, {
     loadData: query.loadData,
+    invalidateDataCache: query.invalidateDataCache,
     openEdit: async (row) => {
       await nav.openEdit(row);
     },
@@ -409,6 +410,7 @@ export function useDefaultList(props: { type: string; authId?: number }) {
       }
       batchEditVisible.value = false;
       ctx.selectedKeys.value = [];
+      query.invalidateDataCache();
       await query.loadData();
       return true;
     } catch (err) {

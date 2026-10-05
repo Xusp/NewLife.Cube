@@ -65,6 +65,7 @@ import {
 } from '@/core/utils/searchFilters';
 import { detectTreeData } from '@/core/utils/tree';
 import { buildTree, canBuildTree } from '@/core/utils/treeBuilder';
+import { isLazyTreeRows } from '@/core/utils/treeLazy';
 import { hexToRgba } from './useListViews';
 import type { WorkflowPageBlock } from '@/core/types/workflow';
 
@@ -354,15 +355,22 @@ export function createListContext(props: { type: string; authId?: number }) {
       (!isLargePageView.value || activeViewKind.value === 'gantt'),
   );
 
-  /** 树数据可用：后端已返回 children 树，或扁平行可组装为树 */
+  /** 树数据可用：后端已返回 children 树、懒加载行集，或扁平行可组装为树 */
   const treeDataDetected = computed(() => {
     const rows = tableData.value;
-    return rows.length > 0 && (detectTreeData(rows) || canBuildTree(rows));
+    return rows.length > 0 && (detectTreeData(rows) || isLazyTreeRows(rows) || canBuildTree(rows));
   });
 
-  /** 树视图展示数据：后端已返回树或可组装时用树，否则回落原始行；字段元数据仍取自 GetPage */
+  /** 大树懒加载行集：行携带后端 __treeLazy 标记（有子级行为 children=true 占位，展开时按需拉子级） */
+  const isLazyTree = computed(
+    () => activeViewKind.value === 'tree' && isLazyTreeRows(tableData.value),
+  );
+
+  /** 树视图展示数据：懒加载行集直接用（VTable 展开装配），其次后端 children 树，最后本地组装；字段元数据仍取自 GetPage */
   const treeRows = computed(() => {
     if (activeViewKind.value !== 'tree') return tableData.value;
+    // 大树懒加载：行集携带 __treeLazy 占位，不能本地组装（会覆盖 children 占位）
+    if (isLazyTree.value) return tableData.value;
     // 后端已返回 children 树，直接使用，避免无谓重建
     if (detectTreeData(tableData.value)) return tableData.value;
     return canBuildTree(tableData.value) ? buildTree(tableData.value) : tableData.value;
@@ -750,6 +758,7 @@ export function createListContext(props: { type: string; authId?: number }) {
     showPagerBar,
     treeDataDetected,
     treeRows,
+    isLazyTree,
     chrome,
     batchDeleteState,
     batchEnableState,

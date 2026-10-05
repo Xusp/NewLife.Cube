@@ -75,16 +75,57 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
             RetrieveTotalCount = PageSetting.EnableTotalCount
         };
 
+        // 树懒加载（大树按需展开）：树视图 + treeLazy=1 时按父级注入等值条件，命中即「当前层」（根层 parentId 缺省=0）；
+        // 根层请求先按规模决策——全表不超过阈值的小树回退全量扩子孙，保持一次加载完整体验
+        var treeLazy = false;
+        var treeLazyRootLayer = false;
+        String treeLazyParent = null;
+        if (ShouldExpandTreeDescendants(p) && TreeDescendantExpand.IsTreeLazyRequest(p))
+        {
+            var lazyThreshold = CubeSetting.Current.TreeLazyThreshold;
+            var parentName = ResolveTreeParentFieldName();
+            if (lazyThreshold > 0 && !parentName.IsNullOrEmpty())
+            {
+                var parentId = p["parentId"].ToInt(0);
+                treeLazyRootLayer = parentId <= 0;
+                if (!treeLazyRootLayer || Entity<TEntity>.Meta.Count > lazyThreshold)
+                {
+                    treeLazy = true;
+                    treeLazyParent = parentName;
+                    p[parentName] = parentId.ToString();
+                }
+            }
+        }
+
         var list = SearchData(p).ToList();
 
+        // 根层约定非 0（或树为空）兜底：清除注入并回退全量扩子孙，避免空树
+        if (treeLazy && treeLazyRootLayer && list.Count == 0)
+        {
+            treeLazy = false;
+            p[treeLazyParent] = null;
+            list = SearchData(p).ToList();
+        }
+
         // 树表命中扩子孙（OSC-26100514b7）：先按命中分页，再并入可见子孙；Page.TotalCount 仍为命中数
-        if (ShouldExpandTreeDescendants(p))
+        if (!treeLazy && ShouldExpandTreeDescendants(p))
         {
             var parentName = ResolveTreeParentFieldName();
             if (!parentName.IsNullOrEmpty())
             {
                 var max = TreeDescendantExpand.ResolveMaxRows(CubeSetting.Current.TreeExpandMaxRows);
                 list = TreeDescendantExpand.ExpandEntities(list, parentName, CanAccess, max, Factory.EntityType.FullName).ToList();
+            }
+        }
+
+        // 树懒加载：行扩展标记 __treeLazy=1 与 children=true（VTable 展开占位）；
+        // 根层把 Page.TotalCount 覆写为全表估算数，界面「共 N 条」不显示为当前层行数
+        if (treeLazy && treeLazyParent != null)
+        {
+            TreeDescendantExpand.MarkLazyChildren(list, treeLazyParent, CanAccess);
+            if (treeLazyRootLayer)
+            {
+                p.TotalCount = Convert.ToInt32(Entity<TEntity>.Meta.Count);
             }
         }
 

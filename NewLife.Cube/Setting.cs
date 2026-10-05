@@ -111,6 +111,11 @@ public class CubeSetting : Config<CubeSetting>
     [Category("通用")]
     public Int32 TreeExpandMaxRows { get; set; } = 100000;
 
+    /// <summary>树懒加载阈值。树视图无查询时，全表行数超过该值时切换为「大树懒加载」（按需展开）；不超过则一次加载全树。默认3000；0 表示关闭懒加载（始终扩子孙）</summary>
+    [Description("树懒加载阈值。树视图无查询时全表超过该值切换为按需展开，默认3000；0 表示关闭")]
+    [Category("通用")]
+    public Int32 TreeLazyThreshold { get; set; } = 3000;
+
     /// <summary>筛选时间窗天数。分表/日志类实体在无时间条件时自动收窄近 N 天，默认30；0 表示关闭</summary>
     [Description("筛选时间窗天数。分表/日志类实体在无时间条件时自动收窄近 N 天，默认30；0 表示关闭")]
     [Category("通用")]

@@ -106,6 +106,32 @@ public class TreeDescendantExpandTests
         Assert.False(TreeDescendantExpand.IsTreeViewRequest((String)null));
     }
 
+    [Fact(DisplayName = "树懒加载_请求门控_1与true")]
+    public void IsTreeLazyRequest_Gate()
+    {
+        Assert.True(TreeDescendantExpand.IsTreeLazyRequest("1"));
+        Assert.True(TreeDescendantExpand.IsTreeLazyRequest("true"));
+        Assert.True(TreeDescendantExpand.IsTreeLazyRequest("TRUE"));
+        Assert.False(TreeDescendantExpand.IsTreeLazyRequest("0"));
+        Assert.False(TreeDescendantExpand.IsTreeLazyRequest(""));
+        Assert.False(TreeDescendantExpand.IsTreeLazyRequest((String)null));
+    }
+
+    [Fact(DisplayName = "树懒加载_标记核心_有子键命中")]
+    public void MarkLazy_MarksParentsWithChildren()
+    {
+        var rows = new List<Node> { new(1, 0), new(2, 0), new(3, 0) };
+        var marks = new Dictionary<Int32, Boolean>();
+        TreeDescendantExpand.MarkLazy(
+            rows,
+            n => n.Id,
+            new Object[] { 1, 3 },
+            (n, has) => marks[n.Id] = has);
+        Assert.True(marks[1]);
+        Assert.False(marks[2]);
+        Assert.True(marks[3]);
+    }
+
     [Fact(DisplayName = "封顶规范_0回落默认_过大夹取")]
     public void ResolveMaxRows_Clamp()
     {

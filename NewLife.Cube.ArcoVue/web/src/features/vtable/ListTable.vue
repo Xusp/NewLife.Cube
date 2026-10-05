@@ -96,9 +96,15 @@ const emit = defineEmits<{
   toggleEnable: [row: Record<string, unknown>, field: string];
   /** 滚动接近底部（剩余不足 200px）时触发，供父级增量加载更多行（列表/树懒加载） */
   scrollBottom: [];
+  /** 树节点展开（VTable 懒加载占位节点）：宿主按需拉取子级后回传 setTreeChildren（大树懒加载） */
+  treeExpand: [payload: { col: number; row: number; originData: Record<string, unknown> }];
 }>();
 
-const { hostRef } = useListTable(props, emit);
+const { hostRef, setTreeLoadingState, setTreeChildren } = useListTable(props, emit);
+
+// 树懒加载（§7.4）：宿主（DefaultList）展开占位节点时标记 loading 并回传子级
+// 行扩展 __treeLazy/children 由后端写入，展开事件由 useListTable 上报
+defineExpose({ setTreeLoadingState, setTreeChildren });
 </script>
 
 <style scoped>

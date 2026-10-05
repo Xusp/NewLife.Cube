@@ -459,6 +459,8 @@
         </a-alert>
 
         <a-spin :loading="loading" style="width: 100%">
+          <!-- 视图区保活（2026-10-05 性能修复）：MapView 组件缓存（include 限定），切其它视图再回来不重建实例、不重拉数据 -->
+          <KeepAlive include="MapView" :max="1">
           <template v-if="activeViewKind === 'table' || activeViewKind === 'tree'">
             <a-alert
               v-if="activeViewKind === 'tree' && tableData.length && !treeDataDetected"
@@ -469,6 +471,7 @@
             </a-alert>
             <ListTable
               v-if="tableColumns.length"
+              ref="listTableRef"
               :records="displayRows"
               :columns="tableColumns"
               :row-key="pkField"
@@ -505,6 +508,7 @@
               @cell-link="onCellLink"
               @toggle-enable="onToggleEnable"
               @scroll-bottom="onTableScrollBottom"
+              @tree-expand="onTreeExpand"
             />
             <div
               v-else
@@ -599,6 +603,7 @@
           <!-- 地图散点视图（OSC-261004d7f4）：全出血地图 + 右上浮动玻璃工具条（缩小/放大/底图/查询/填色）+ 悬停卡 + 右下定位按钮与实时比例尺 -->
           <MapView
             v-else-if="activeViewKind === 'map'"
+            :key="typePath"
             ref="mapViewRef"
             :records="tableData"
             :fields="listFields"
@@ -728,6 +733,7 @@
           >
             <a-empty description="未知视图类型" />
           </div>
+          </KeepAlive>
         </a-spin>
 
         <div v-if="showPagerBar" class="list-pager">
@@ -746,7 +752,8 @@
         </div>
         <div v-else-if="isLargePageView" class="list-pager list-pager--hint">
           <a-typography-text type="secondary" class="list-pager-hint">
-            当前视图一次最多加载 {{ effectivePageSize }} 条（共 {{ pagination.total }} 条）
+            <template v-if="isLazyTree">大树懒加载：按需展开节点（共 {{ pagination.total }} 条）</template>
+            <template v-else>当前视图一次最多加载 {{ effectivePageSize }} 条（共 {{ pagination.total }} 条）</template>
           </a-typography-text>
         </div>
       </div>
@@ -874,6 +881,7 @@ import { computed, defineAsyncComponent, ref } from 'vue';
 import type { FieldMeta } from '@/core/types/field';
 import { useDefaultList } from './useDefaultList';
 import { useMapTools, type MapViewHandle } from './useMapTools';
+import { getValueByKey } from '@/core/utils/url';
 /** VTable / 多视图异步加载，降低 DynamicPage 首包 */
 const ListTable = defineAsyncComponent(() => import('@/features/vtable/ListTable.vue'));
 const CardList = defineAsyncComponent(() => import('@/features/views/CardList.vue'));
@@ -1092,7 +1100,9 @@ const {
   loadMapLevelPage,
   loadMapLocateRow,
   loadMapCategoryValues,
+  loadTreeChildren,
   isLargePageView,
+  isLazyTree,
   getActiveView,
   columnTitles,
   onConfigSort,
@@ -1128,6 +1138,29 @@ const {
 } = useUserStatChart(typePath, chartRequestParams);
 
 const insightPanelRef = ref<{ openAdd?: () => void } | null>(null);
+
+/** 树懒加载（§7.4）：ListTable 句柄（展开占位节点时标记 loading 并回传子级） */
+const listTableRef = ref<{
+  setTreeLoadingState?: (col: number, row: number) => void;
+  setTreeChildren?: (children: Record<string, unknown>[], col: number, row: number) => void;
+} | null>(null);
+
+/** 树懒加载展开（VTable）：拉取该节点直接子级后回传装配；已加载（children 已为数组）不重复请求 */
+async function onTreeExpand(payload: {
+  col: number;
+  row: number;
+  originData: Record<string, unknown>;
+}) {
+  if (!isLazyTree.value) return;
+  const id = getValueByKey(payload.originData, pkField.value);
+  if (id == null || id === '') return;
+  const loaded = payload.originData?.children;
+  if (Array.isArray(loaded) && loaded.length > 0) return;
+  listTableRef.value?.setTreeLoadingState?.(payload.col, payload.row);
+  const rows = await loadTreeChildren(id as string | number);
+  listTableRef.value?.setTreeChildren?.(rows ?? [], payload.col, payload.row);
+}
+
 function openDashboard() {
   insightPanelRef.value?.openAdd?.();
 }

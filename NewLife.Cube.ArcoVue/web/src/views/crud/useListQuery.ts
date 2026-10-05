@@ -18,11 +18,24 @@ import { normalizePageSize } from '@/core/utils/viewMapping';
 import { buildViewFilterParam, matchesViewFilter } from '@/core/utils/searchFilters';
 import { getPageCached } from '@/core/utils/pageMetaCache';
 import { listRequestSignature } from '@/core/utils/listRequestSignature';
+import { createSignatureCache } from '@/core/utils/signatureCache';
+import { shouldUseTreeLazy } from '@/core/utils/treeLazy';
 import type { WorkflowPageBlock } from '@/core/types/workflow';
 import { useTenantStore } from '@/stores/tenant';
 import { useRecentKeywords } from '@/core/composables/useRecentKeywords';
 import type { ListContext } from './listContext';
 import type { FieldMeta } from '@/core/types/field';
+
+/** 列表原始数据快照（签名缓存条目）：rows/total/stat/时间窗提示整体复用，保证切回后分页与统计一致 */
+interface ListRawSnapshot {
+  rows: Record<string, unknown>[];
+  total: number;
+  stat: Record<string, unknown> | null;
+  filterNarrowed: string;
+}
+
+/** 已加载数据缓存 TTL（毫秒）：视图切换复用窗口；过期后自动回源以刷新数据 */
+const DATA_CACHE_TTL = 60_000;
 
 /**
  * 本页 LOV 值里，标签缓存和字段 dataSource 都没有的那些。已有 dataSource 不因此跳过整列。
@@ -45,6 +58,26 @@ export function useListQuery(ctx: ListContext) {
   const { recentKeywords, add: addRecentKeyword } = useRecentKeywords();
   /** loadData 竞态序号：快速切换/连续搜索/翻页时丢弃过期响应（OSC-260830a1b2 收尾） */
   const dataSeq = ref(0);
+  /**
+   * 原始行快照缓存（TTL+LRU）：跨视图切换按完整请求签名复用，避免重复请求（2026-10-05 性能修复）；
+   * 树表扩子孙单响应可达数 MB，重复请求代价高
+   */
+  const rawSnapshotCache = createSignatureCache<ListRawSnapshot>({ max: 4, ttl: DATA_CACHE_TTL });
+  /** 地图续页缓存（签名 → 页码桶） */
+  const mapPageCache = createSignatureCache<Map<number, Record<string, unknown>[]>>({
+    max: 3,
+    ttl: DATA_CACHE_TTL,
+  });
+  /** 地图分层页缓存（签名+层级 → 页码桶） */
+  const mapLevelCache = createSignatureCache<Map<number, Record<string, unknown>[]>>({
+    max: 6,
+    ttl: DATA_CACHE_TTL,
+  });
+  /** 树懒加载子级缓存（签名含 parentId → 行集）：折叠再展开不重复请求；数据变更由 invalidateDataCache 清理 */
+  const treeChildrenCache = createSignatureCache<Record<string, unknown>[]>({
+    max: 20,
+    ttl: DATA_CACHE_TTL,
+  });
 
   function withoutTenant(fields: FieldMeta[]): FieldMeta[] {
     if (tenantStore.enableTenant) return fields;
@@ -305,6 +338,13 @@ export function useListQuery(ctx: ListContext) {
         isLargePageView.value && activeViewKind.value !== 'gantt' ? 1 : pagination.current;
       const requestFilter = requestViewFilter();
       const vf = buildViewFilterParam(requestFilter);
+      // 大树懒加载：树视图 + 树实体 + 无查询时声明 treeLazy，后端按规模自动回退小树全量（§7.4）
+      const treeLazy = shouldUseTreeLazy({
+        viewKind: activeViewKind.value,
+        isTreeEntity: pageSetting.value?.isTreeEntity,
+        search: effectiveSearch.value,
+        hasFilter: !!vf,
+      });
       const requestParams = {
         typePath: typePath.value,
         tenantCode: tenantStore.currentCode,
@@ -314,16 +354,21 @@ export function useListQuery(ctx: ListContext) {
         ...effectiveSearch.value,
         ...(vf ? { viewFilter: vf } : {}),
         ...(activeViewKind.value === 'tree' ? { viewKind: 'tree' } : {}),
+        ...(treeLazy ? { treeLazy: '1' } : {}),
       };
       const requestSignature = listRequestSignature(requestParams);
       let rows: Record<string, unknown>[];
-      if (
-        skipFetch &&
-        tableDataRaw.value.length &&
-        tableDataRequestSignature.value === requestSignature
-      ) {
-        // 复用已加载原始数据（视图切换/纯前端筛选变化：搜索、排序、加载量未变，避免重复请求后端）
-        rows = tableDataRaw.value;
+      // 视图切换复用（2026-10-05 性能修复）：先查签名缓存（含历史视图结果：表格/树表/看板等），
+      // 命中零请求；未命中回源并写入缓存。数据变更后由 invalidateDataCache 清空，避免读到旧数据
+      const cachedSnapshot = skipFetch ? rawSnapshotCache.get(requestSignature) : null;
+      let fetched = false;
+      if (cachedSnapshot) {
+        rows = cachedSnapshot.rows;
+        tableDataRaw.value = rows;
+        tableDataRequestSignature.value = requestSignature;
+        statData.value = cachedSnapshot.stat;
+        pagination.total = cachedSnapshot.total;
+        filterNarrowed.value = cachedSnapshot.filterNarrowed;
       } else {
         // 视图筛选下推（OSC-260819e483 P2）：有条件才传 viewFilter，后端 SearchData 可下推时服务端过滤；
         // 无法下推时忽略服务端过滤，本页仍由下方 matchesViewFilter 复核（翻页不完整为已知限制）
@@ -334,6 +379,7 @@ export function useListQuery(ctx: ListContext) {
           ...effectiveSearch.value,
           ...(vf ? { viewFilter: vf } : {}),
           ...(activeViewKind.value === 'tree' ? { viewKind: 'tree' } : {}),
+          ...(treeLazy ? { treeLazy: '1' } : {}),
         });
         // 过期响应丢弃，避免覆盖最新的 tableData/total/loading
         if (seq !== dataSeq.value) return;
@@ -345,6 +391,14 @@ export function useListQuery(ctx: ListContext) {
         // 时间窗收窄提示（OSC-260830a1b2）：读响应体 filterNarrowed（后端已从响应头透传到 ApiListResponse.FilterNarrowed）
         filterNarrowed.value =
           res.filterNarrowed && res.filterNarrowed > 0 ? `${res.filterNarrowed}d` : '';
+        // 写入签名缓存：供其它视图切回时整体复用（含分页/统计，避免重算）
+        rawSnapshotCache.set(requestSignature, {
+          rows,
+          total: pagination.total,
+          stat: statData.value,
+          filterNarrowed: filterNarrowed.value,
+        });
+        fetched = true;
       }
       // 筛选构建器客户端复核（OSC-0015）：业务重写 Search 的控制器可能不应用通用等值过滤。
       // 树表命中扩子孙（OSC-26100514b7）：子孙无需匹配 viewFilter，跳过本页裁剪以免裁掉扩入行。
@@ -365,7 +419,8 @@ export function useListQuery(ctx: ListContext) {
       } else {
         tableData.value = rows;
       }
-      if (!skipFetch) {
+      // 新取回的数据补水合标签；缓存命中视为已水合（行对象与首次加载为同一批）
+      if (fetched) {
         await hydrateLovLabels(tableData.value);
         await hydrateAreaLabels(tableData.value);
       }
@@ -548,12 +603,33 @@ export function useListQuery(ctx: ListContext) {
     Message.success('已删除');
   }
 
+  /** 地图请求查询签名（不含页码；分页由缓存桶的页码维度承载）：查询条件变化自动隔离缓存 */
+  function mapQuerySignature(): string {
+    const sort = buildSortsPayload(activeSorts.value);
+    const vf = buildViewFilterParam(requestViewFilter());
+    return listRequestSignature({
+      typePath: typePath.value,
+      tenantCode: tenantStore.currentCode,
+      pageSize: effectivePageSize.value,
+      ...sort,
+      ...effectiveSearch.value,
+      ...(vf ? { viewFilter: vf } : {}),
+    });
+  }
+
   /**
    * 地图视图续页（OSC-261004d7f4）：与主请求同参（搜索/排序/视图筛选/条数），仅换页码；
    * pageIndex 为 1 基（后端 (pageIndex-1)*pageSize；首批为主列表第 1 页，续页从 2 起）；
    * 不写主状态（tableData/loading），失败或无更多时返回 null；查询变更由调用方（地图管线）自行中止。
+   * 2026-10-05 性能修复：结果按签名+页码入缓存，切换视图回来不再重复请求。
    */
   async function loadMapPage(pageIndex: number): Promise<Record<string, unknown>[] | null> {
+    const sig = mapQuerySignature();
+    const bucket = mapPageCache.get(sig);
+    if (bucket?.has(pageIndex)) {
+      const cached = bucket.get(pageIndex)!;
+      return cached.length ? cached : null;
+    }
     try {
       const sort = buildSortsPayload(activeSorts.value);
       const requestFilter = requestViewFilter();
@@ -566,6 +642,9 @@ export function useListQuery(ctx: ListContext) {
         ...(vf ? { viewFilter: vf } : {}),
       });
       const rows = (res.data as Record<string, unknown>[]) || [];
+      const pages = bucket ?? new Map<number, Record<string, unknown>[]>();
+      pages.set(pageIndex, rows);
+      mapPageCache.set(sig, pages);
       return rows.length ? rows : null;
     } catch {
       return null;
@@ -576,12 +655,19 @@ export function useListQuery(ctx: ListContext) {
    * 地图分层续页（OSC-261004d7f4）：与主请求同参（搜索/排序/视图筛选），额外按层级字段过滤；
    * 供地区等层级实体「放大逐层加载、缩小隐藏细层」使用；pageIndex 为 1 基（后端约定），
    * 分页步长与地图视图页大小一致（1000）。失败返回 null（数据泵静默跳过）。不写主状态。
+   * 2026-10-05 性能修复：结果按签名+层级+页码入缓存，切换视图回来不再重复请求。
    */
   async function loadMapLevelPage(
     levelField: string,
     level: number,
     pageIndex: number,
   ): Promise<Record<string, unknown>[] | null> {
+    const sig = `${mapQuerySignature()}::${levelField}::${level}`;
+    const bucket = mapLevelCache.get(sig);
+    if (bucket?.has(pageIndex)) {
+      const cached = bucket.get(pageIndex)!;
+      return cached.length ? cached : null;
+    }
     try {
       const sort = buildSortsPayload(activeSorts.value);
       const requestFilter = requestViewFilter();
@@ -595,6 +681,9 @@ export function useListQuery(ctx: ListContext) {
         [levelField]: level,
       });
       const rows = (res.data as Record<string, unknown>[]) || [];
+      const pages = bucket ?? new Map<number, Record<string, unknown>[]>();
+      pages.set(pageIndex, rows);
+      mapLevelCache.set(sig, pages);
       return rows.length ? rows : null;
     } catch {
       return null;
@@ -644,6 +733,52 @@ export function useListQuery(ctx: ListContext) {
     }
   }
 
+  /** 数据变更（增删改/导入/批量操作）后调用：清空跨视图数据缓存，避免树/地图等视图切回时读到旧结果 */
+  function invalidateDataCache() {
+    rawSnapshotCache.clear();
+    mapPageCache.clear();
+    mapLevelCache.clear();
+    treeChildrenCache.clear();
+  }
+
+  /**
+   * 树懒加载子级（大树按需展开）：拉取指定节点的直接子级（无查询行集，与根层同语义）；
+   * 结果行携带 __treeLazy/children 占位，由 VTable setRecordChildren 装配；失败返回 null。
+   * 不写主状态（tableData/loading）。
+   */
+  async function loadTreeChildren(
+    parentId: string | number,
+  ): Promise<Record<string, unknown>[] | null> {
+    const sort = buildSortsPayload(activeSorts.value);
+    const sig = listRequestSignature({
+      typePath: typePath.value,
+      tenantCode: tenantStore.currentCode,
+      parentId: String(parentId),
+      pageSize: effectivePageSize.value,
+      treeLazy: '1',
+      ...sort,
+    });
+    const cached = treeChildrenCache.get(sig);
+    if (cached) return cached;
+    try {
+      const res = await cubeApi.page.getList(typePath.value, {
+        pageIndex: 1,
+        pageSize: effectivePageSize.value,
+        ...sort,
+        viewKind: 'tree',
+        treeLazy: '1',
+        parentId: String(parentId),
+      });
+      const rows = (res.data as Record<string, unknown>[]) || [];
+      await hydrateLovLabels(rows);
+      await hydrateAreaLabels(rows);
+      treeChildrenCache.set(sig, rows);
+      return rows;
+    } catch {
+      return null;
+    }
+  }
+
   function onPageChange(page: number) {
     pagination.current = page;
     loadData();
@@ -685,10 +820,12 @@ export function useListQuery(ctx: ListContext) {
     onPageChange,
     onPageSizeChange,
     onTableScrollBottom,
+    invalidateDataCache,
     loadMapPage,
     loadMapLevelPage,
     loadMapLocateRow,
     loadMapCategoryValues,
+    loadTreeChildren,
   };
 }
 

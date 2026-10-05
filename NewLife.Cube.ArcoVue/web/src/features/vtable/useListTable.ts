@@ -177,6 +177,8 @@ interface ListTableEmits {
   toggleEnable: [row: Record<string, unknown>, field: string];
   /** 滚动接近底部（剩余不足 200px）时触发，供父级增量加载更多行（列表/树懒加载） */
   scrollBottom: [];
+  /** 树节点展开（VTable 懒加载占位节点）：宿主按需拉取子级后回传 setTreeChildren（大树懒加载） */
+  treeExpand: [payload: { col: number; row: number; originData: Record<string, unknown> }];
 }
 
 type ListTableEmit = <K extends keyof ListTableEmits>(event: K, ...args: ListTableEmits[K]) => void;
@@ -1344,6 +1346,9 @@ export function useListTable(props: ListTableProps, emit: ListTableEmit) {
       if (props.canViewDetail && props.enableTableDoubleClick !== false) emit('rowDblClick', row);
     }) as any);
 
+    // 大树懒加载（树表增强）：树节点展开事件 → 宿主按需拉子级后回传（setTreeChildren）
+    table.on('tree_hierarchy_state_change', onTreeHierarchyStateChange as any);
+
     table.on('checkbox_state_change', (() => {
       // 延后到宏任务读取：VTable 内部级联监听（bindGroupTitleCheckboxChange/bindGroupCheckboxTreeChange）在
       // setTimeout(0) 中注册，晚于本监听。若同步读取会拿到级联前的旧状态并 emit 空 → 父级清空 selectedKeys →
@@ -1479,6 +1484,43 @@ export function useListTable(props: ListTableProps, emit: ListTableEmit) {
     if (total > viewH && top + viewH >= total - 200) emit('scrollBottom');
   }
 
+  /** 树懒加载：VTable 树节点展开事件 → 上报宿主（仅展开态；折叠忽略；非树视图忽略） */
+  function onTreeHierarchyStateChange(args: unknown) {
+    if (!props.hierarchy) return;
+    const a = args as {
+      hierarchyState?: string;
+      col?: number;
+      row?: number;
+      originData?: Record<string, unknown>;
+    } | null;
+    if (!a || String(a.hierarchyState ?? '') !== 'expand') return;
+    const originData = a.originData;
+    if (!originData || typeof originData !== 'object') return;
+    emit('treeExpand', {
+      col: Number(a.col ?? 0),
+      row: Number(a.row ?? 0),
+      originData,
+    });
+  }
+
+  /** 树懒加载：标记节点为加载中（loading 图标；setTreeChildren 后自动恢复） */
+  function setTreeLoadingState(col: number, row: number) {
+    try {
+      (table as any)?.setLoadingHierarchyState?.(col, row);
+    } catch {
+      /* 表格可能已重建：忽略 */
+    }
+  }
+
+  /** 树懒加载：回传某节点的子级数据（插入并保持展开） */
+  function setTreeChildren(children: Record<string, unknown>[], col: number, row: number) {
+    try {
+      (table as any)?.setRecordChildren?.(children, col, row);
+    } catch {
+      /* 表格可能已重建：忽略 */
+    }
+  }
+
   onMounted(() => {
     mountTable();
     table?.on('scroll', onTableScroll);
@@ -1524,6 +1566,7 @@ export function useListTable(props: ListTableProps, emit: ListTableEmit) {
     hostRef.value?.removeEventListener('mousemove', onHostMouseMove, true);
     hostRef.value?.removeEventListener('mouseleave', onHostMouseLeave, true);
     table?.off('scroll', onTableScroll);
+    table?.off('tree_hierarchy_state_change', onTreeHierarchyStateChange as any);
     table?.release();
     table = null;
   });
@@ -1598,5 +1641,5 @@ export function useListTable(props: ListTableProps, emit: ListTableEmit) {
     },
   );
 
-  return { hostRef };
+  return { hostRef, setTreeLoadingState, setTreeChildren };
 }

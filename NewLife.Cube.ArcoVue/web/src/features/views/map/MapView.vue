@@ -88,6 +88,8 @@ import type { ColumnPref, ViewFormatRule } from '@/core/utils/viewProfile';
 import MapHoverCard from './MapHoverCard.vue';
 import { useMapView, type MapViewPersistState } from './useMapView';
 
+defineOptions({ name: 'MapView' });
+
 const props = defineProps<{
   /** 已加载行（父级首批数据；续页由 loadPage 提供） */
   records: readonly Record<string, unknown>[];

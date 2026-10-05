@@ -19,6 +19,8 @@ import type { ListContext } from './listContext';
 
 interface ListCrudDeps {
   loadData: (skipFetch?: boolean) => Promise<void>;
+  /** 数据变更后清空跨视图数据缓存（2026-10-05 性能修复）：避免树/地图等视图切回时读到旧结果 */
+  invalidateDataCache: () => void;
   openEdit: (row: Record<string, unknown>) => Promise<void>;
   openDetail: (row: Record<string, unknown>) => Promise<void>;
 }
@@ -53,7 +55,7 @@ export function useListCrud(ctx: ListContext, deps: ListCrudDeps) {
     chartVisible,
     chartList,
   } = ctx;
-  const { loadData, openEdit, openDetail } = deps;
+  const { loadData, invalidateDataCache, openEdit, openDetail } = deps;
 
   function watchMapping() {
     const kind = activeViewKind.value;
@@ -65,6 +67,8 @@ export function useListCrud(ctx: ListContext, deps: ListCrudDeps) {
 
   /** 编辑写回：树、排序、筛选或视图观察字段命中时整表刷新，否则改当前行。 */
   async function finishEdit(patch: Record<string, unknown>) {
+    // 数据已变更：清跨视图缓存（本函数可能只做局部写回不重载，缓存必须失效）
+    invalidateDataCache();
     const watch = reloadWatchFields(activeViewKind.value, watchMapping());
     if (
       activeViewKind.value === 'tree' ||
@@ -156,6 +160,7 @@ export function useListCrud(ctx: ListContext, deps: ListCrudDeps) {
         if (patch.fail > 0) throw new Error(patch.errors?.[0]?.message || '操作失败');
         Message.success(target ? `${label}：已开启` : `${label}：已关闭`);
       }
+      invalidateDataCache();
       if (shouldReloadAfterPatch(field.name, activeSorts.value, viewFilter.value)) await loadData();
     } catch (err) {
       // 失败回滚：恢复源行与点击行，并再次换数组引用触发重绘
@@ -216,6 +221,7 @@ export function useListCrud(ctx: ListContext, deps: ListCrudDeps) {
       return;
     }
     try {
+      invalidateDataCache();
       if (shouldReloadAfterPatch(payload.field, activeSorts.value, viewFilter.value)) await loadData();
     } catch (err) {
       Message.error(formatApiError(err, '更新失败'));
@@ -257,8 +263,10 @@ export function useListCrud(ctx: ListContext, deps: ListCrudDeps) {
       Message.success('保存成功');
       fieldErrors.value = [];
       drawerVisible.value = false;
-      if (mode === 'add') await loadData();
-      else await finishEdit(payload);
+      if (mode === 'add') {
+        invalidateDataCache();
+        await loadData();
+      } else await finishEdit(payload);
     } catch (err) {
       // 后端字段级错误优先映射到表单字段；其余保留全局提示（OSC-0009）
       const errors =
@@ -285,6 +293,7 @@ export function useListCrud(ctx: ListContext, deps: ListCrudDeps) {
     try {
       await cubeApi.page.add(typePath.value, payload);
       Message.success('保存成功');
+      invalidateDataCache();
       await loadData();
       return true;
     } catch (err) {
@@ -302,6 +311,7 @@ export function useListCrud(ctx: ListContext, deps: ListCrudDeps) {
     const id = getValueByKey(row, pkField.value);
     await cubeApi.page.remove(typePath.value, id as string | number);
     Message.success('删除成功');
+    invalidateDataCache();
     if (activeViewKind.value === 'tree') {
       loadData();
       return;
@@ -358,6 +368,7 @@ export function useListCrud(ctx: ListContext, deps: ListCrudDeps) {
     await cubeApi.page.deleteSelect(typePath.value, selectedKeys.value);
     Message.success('批量删除成功');
     selectedKeys.value = [];
+    invalidateDataCache();
     loadData();
   }
 
@@ -390,6 +401,7 @@ export function useListCrud(ctx: ListContext, deps: ListCrudDeps) {
       const msg = (res as { message?: string })?.message;
       Message.success(msg || (enable ? '启用成功' : '禁用成功'));
       selectedKeys.value = [];
+      invalidateDataCache();
       await loadData();
     } catch (err) {
       Message.error(formatApiError(err, enable ? '批量启用失败' : '批量禁用失败'));
@@ -415,6 +427,7 @@ export function useListCrud(ctx: ListContext, deps: ListCrudDeps) {
       await cubeApi.page.importFile(typePath.value, file);
       Message.success('导入成功');
       option.onSuccess();
+      invalidateDataCache();
       loadData();
     } catch {
       Message.error('导入失败');

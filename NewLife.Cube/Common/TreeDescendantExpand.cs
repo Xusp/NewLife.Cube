@@ -1,3 +1,4 @@
+using NewLife.Data;
 using NewLife.Log;
 using NewLife.Reflection;
 using NewLife.Web;
@@ -25,6 +26,14 @@ public static class TreeDescendantExpand
     /// <summary>从分页参数读取 viewKind</summary>
     public static Boolean IsTreeViewRequest(Pager p) =>
         p != null && IsTreeViewRequest(p["viewKind"]);
+
+    /// <summary>请求是否声明树懒加载（大树按需展开）</summary>
+    public static Boolean IsTreeLazyRequest(String treeLazy) =>
+        !treeLazy.IsNullOrEmpty() && (treeLazy == "1" || treeLazy.EqualIgnoreCase("true"));
+
+    /// <summary>从分页参数读取 treeLazy</summary>
+    public static Boolean IsTreeLazyRequest(Pager p) =>
+        p != null && IsTreeLazyRequest(p["treeLazy"]);
 
     /// <summary>把配置封顶规范到 [1, 1_000_000]；0 及负数回落到默认</summary>
     public static Int32 ResolveMaxRows(Int32 configured)
@@ -133,6 +142,95 @@ public static class TreeDescendantExpand
             (hitCount, total) =>
                 XTrace.WriteLine("[TreeExpand] truncated type={0} hits={1} total={2} max={3}",
                     typeName ?? typeof(TEntity).Name, hitCount, total, ResolveMaxRows(maxRows)));
+    }
+
+    /// <summary>懒加载标记核心：rows 中主键出现在 childParentKeys 的行标记为「有子级」</summary>
+    /// <typeparam name="T">行类型</typeparam>
+    /// <param name="rows">当前层行集</param>
+    /// <param name="getId">主键提取</param>
+    /// <param name="childParentKeys">存在子级的父键集合（子行查询结果）</param>
+    /// <param name="mark">行标记回调（true=有子级）</param>
+    public static void MarkLazy<T>(
+        IList<T> rows,
+        Func<T, Object> getId,
+        IEnumerable<Object> childParentKeys,
+        Action<T, Boolean> mark)
+    {
+        if (rows == null || rows.Count == 0) return;
+        if (getId == null) throw new ArgumentNullException(nameof(getId));
+        mark ??= (_, _) => { };
+
+        var withChild = new HashSet<String>(StringComparer.Ordinal);
+        if (childParentKeys != null)
+        {
+            foreach (var key in childParentKeys)
+            {
+                if (key != null) withChild.Add(key.ToString());
+            }
+        }
+
+        foreach (var row in rows)
+        {
+            if (row == null) continue;
+            var id = getId(row);
+            mark(row, id != null && withChild.Contains(id.ToString()));
+        }
+    }
+
+    /// <summary>实体行懒加载标记：写入行扩展 __treeLazy=1；有可见直接子级的行写入 children=true（前端 VTable 展开占位）</summary>
+    /// <param name="rows">当前层行集（根层或某节点的直接子级）</param>
+    /// <param name="parentField">父级字段名</param>
+    /// <param name="canView">可见性过滤（行权）：不可见子级不计入「有子级」</param>
+    public static void MarkLazyChildren<TEntity>(
+        IList<TEntity> rows,
+        String parentField,
+        Func<TEntity, Boolean> canView = null)
+        where TEntity : Entity<TEntity>, new()
+    {
+        if (rows == null || rows.Count == 0) return;
+        if (parentField.IsNullOrEmpty()) return;
+
+        var idField = Entity<TEntity>.Meta.Unique;
+        var parentFi = Entity<TEntity>.Meta.Table.FindByName(parentField);
+        if (idField is null || parentFi is null) return;
+
+        // 收集主键 → 只查父列的批量存在性（省流量；行权可见的子级才计入）
+        var ids = new List<Object>();
+        foreach (var row in rows)
+        {
+            if (row == null) continue;
+            var id = row[idField.Name];
+            if (id != null) ids.Add(id);
+        }
+
+        var parentKeys = new List<Object>();
+        if (ids.Count > 0)
+        {
+            try
+            {
+                var children = Entity<TEntity>.FindAll(parentFi.In(ids.ToArray()), null, parentFi.Name);
+                if (children != null)
+                {
+                    foreach (var child in children)
+                    {
+                        if (child == null || (canView != null && !canView(child))) continue;
+                        var key = child[parentFi.Name];
+                        if (key != null) parentKeys.Add(key);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                XTrace.WriteLine("[TreeLazy] 子级探测失败：{0}", ex.Message);
+            }
+        }
+
+        MarkLazy(rows, e => e[idField.Name], parentKeys, (e, hasChild) =>
+        {
+            if (e is not IExtend ext) return;
+            ext.Items["__treeLazy"] = 1;
+            if (hasChild) ext.Items["children"] = true;
+        });
     }
 
     static Func<IReadOnlyList<Object>, IEnumerable<TEntity>> BuildChildFinder<TEntity>(FieldItem parentFi)
