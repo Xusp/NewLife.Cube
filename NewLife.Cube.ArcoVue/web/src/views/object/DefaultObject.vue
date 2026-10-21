@@ -32,7 +32,7 @@
         </a-spin>
       </aside>
 
-      <!-- 右侧：主题表面 + Category 分组表单（不折叠、流式 6/12）+ 底部面板 -->
+      <!-- 右侧：配置表单面板；分组由左侧菜单承担，保存在表单 Footer -->
       <main class="obj-main">
         <div class="obj-surface">
           <div class="obj-header">
@@ -46,9 +46,8 @@
             <template v-else-if="!loading">
               <a-form :model="form" layout="vertical" class="obj-form">
                 <div class="form-groups">
-                  <section v-for="g in visibleGroups" :key="g.category" class="form-group">
-                    <h3 class="form-group__title">{{ g.category }}</h3>
-                    <!-- 每个配置项占一行，居中排版，宽 6/12（全宽控件 12/12） -->
+                  <template v-for="g in visibleGroups" :key="g.category">
+                    <!-- 分组名由左侧菜单承担；字段直接铺在表单面板内 -->
                     <a-row
                       v-for="f in g.fields"
                       :key="f.name"
@@ -70,18 +69,14 @@
                         </a-form-item>
                       </a-col>
                     </a-row>
-                  </section>
+                  </template>
+                </div>
+                <div v-if="canUpdate && !loadError" class="obj-form__footer">
+                  <a-button type="primary" :loading="saving" @click="save">保存</a-button>
                 </div>
               </a-form>
             </template>
           </a-spin>
-        </div>
-
-        <!-- 底部面板：参照默认列表视图的 list-pager，保存操作常驻底部 -->
-        <div v-if="canUpdate && fields.length && !loadError" class="obj-footer">
-          <a-space>
-            <a-button type="primary" :loading="saving" @click="save">保存</a-button>
-          </a-space>
         </div>
       </main>
     </div>
@@ -92,8 +87,8 @@
 /**
  * DefaultObject — 通用 ObjectController 配置中心（OSC-2608139feb 魔方设置优化）
  * 契约：GET type + GetFields + FieldInput + PUT；左列表（自动注入 Object 页）右配置；
- * 多分组对象的 Category 作为左子菜单管理；右侧分组不折叠、流式布局（标签+编辑框 6/12）；
- * description 经 form-item tooltip 展示；底部常驻保存面板。
+ * 多分组对象的 Category 作为左子菜单管理；右侧不再重复分组标题与外框，字段流式布局（6/12）；
+ * description 经 form-item tooltip 展示；保存按钮在表单 Footer。
  */
 import FieldInput from '@/components/FieldInput.vue';
 import { isFullWidthControl, resolveControl } from '@/core/utils/fieldControl';
@@ -179,17 +174,16 @@ function onMenuClick(key: string) {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
 }
 /* 主题表面：与默认列表视图 list-surface 同源的主题变量外壳 */
 .obj-surface {
-  padding: 16px 16px 4px;
+  padding: 16px 0 0;
   background: var(--color-bg-2);
   border: 1px solid var(--color-border-2);
   border-radius: 8px;
 }
 .obj-header {
-  margin-bottom: 16px;
+  margin: 0 16px 16px;
 }
 .obj-header h2 {
   margin: 0;
@@ -198,38 +192,21 @@ function onMenuClick(key: string) {
   color: var(--color-text-1);
 }
 .obj-alert {
-  margin-bottom: 16px;
+  margin: 0 16px 16px;
 }
 .obj-form {
   width: 100%;
 }
-/* 分组外壳：与实体编辑表单 FormContent.form-group 同一主题样式，占满面板宽度 */
 .form-groups {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding-bottom: 12px;
+  padding: 0 16px 4px;
 }
-.form-group {
-  padding: 16px 16px 4px;
-  background: var(--color-bg-1);
-  border: 1px solid var(--color-border-2);
-  border-radius: 8px;
-}
-.form-group__title {
-  margin: 0 0 12px;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 22px;
-  color: var(--color-text-1);
-}
-/* 底部面板：参照默认列表视图 list-pager 的常驻底部操作区，保存按钮右对齐 */
-.obj-footer {
+/* 表单 Footer：与配置项同一面板，保存右对齐 */
+.obj-form__footer {
   display: flex;
   justify-content: flex-end;
   padding: 12px 16px;
-  background: var(--color-bg-2);
-  border: 1px solid var(--color-border-2);
-  border-radius: 8px;
+  border-top: 1px solid var(--color-border-2);
 }
 </style>

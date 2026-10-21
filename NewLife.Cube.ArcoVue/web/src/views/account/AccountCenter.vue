@@ -185,7 +185,7 @@ const { links, openAccountLink } = useAccountLinks();
   gap: 8px;
   padding-bottom: 16px;
 }
-/* 底部卡片：参照魔方设置 obj-footer / 列表 list-pager */
+/* 底部卡片：参照列表 list-pager */
 .account-footer {
   display: flex;
   justify-content: flex-end;

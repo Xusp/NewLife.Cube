@@ -70,14 +70,9 @@ for (const type of ['/Admin/Cube', '/Admin/Sys', '/Admin/Core', '/Admin/XCode'])
     if (type === '/Admin/Cube') {
       const cubeSubs = await sideMenu.locator('.arco-menu-inline').count();
       expect(cubeSubs, '/Admin/Cube 应有 Category 子菜单').toBeGreaterThanOrEqual(1);
-      // 右侧分组标题（不折叠 section h3）
-      await expect(page.locator('.form-group__title').first()).toBeVisible();
     }
-    // Category 分组标题（含单分组 h3）存在
-    expect(
-      (await page.locator('.form-group__title').count()) >= 1,
-      `${type} 应有 Category 分组`,
-    ).toBe(true);
+    // 分组名在左侧菜单，右侧表单不再重复标题与外框
+    await expect(page.locator('.form-group__title')).toHaveCount(0);
   });
 }
 
