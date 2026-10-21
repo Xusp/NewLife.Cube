@@ -16,7 +16,7 @@ import type { MapProviderKind } from '@/core/utils/mapConfig';
 import { getValueByKey } from '@/core/utils/url';
 import type { MapMapping } from '@/core/utils/viewMapping';
 import type { ViewFormatRule } from '@/core/utils/viewProfile';
-import type { MapAdapter, MapAdapterPoint } from './mapAdapter';
+import type { MapAdapter, MapAdapterOptions, MapAdapterPoint } from './mapAdapter';
 import { clampZoom, isMapStubMode } from './mapAdapter';
 import { createAmapAdapter } from './amapAdapter';
 import { createBaiduAdapter } from './baiduAdapter';
@@ -35,6 +35,7 @@ import {
 import { boundsOf, expandBounds, inBounds, pickViewportPoints } from './mapViewport';
 import { createStubAdapter } from './stubAdapter';
 import { createTencentAdapter } from './tencentAdapter';
+import { createTiandituAdapter } from './tiandituAdapter';
 
 export interface UseMapViewOptions {
   /** 地图容器元素 */
@@ -117,6 +118,8 @@ export function useMapView(opts: UseMapViewOptions) {
   const appStore = useAppStore();
   const ready = ref(false);
   const error = ref('');
+  /** 底图瓦片失败提示（标记仍可用；不盖住整张地图） */
+  const basemapWarning = ref('');
   const initializing = ref(true);
   const zoom = ref(5);
   const drawnCount = ref(0);
@@ -287,6 +290,12 @@ export function useMapView(opts: UseMapViewOptions) {
     return appStore.mapConfig.provider ?? '';
   }
 
+  /** 桩/未配置按高德 GCJ-02；真实服务商按各自底图坐标系 */
+  function coordTarget() {
+    const src = sourceOf();
+    return targetSystemOf(src === 'stub' || src === '' ? 'amap' : src);
+  }
+
   function maxPoints(): number {
     const m = opts.mapping();
     return m?.maxPoints && m.maxPoints > 0 ? m.maxPoints : 1000000;
@@ -390,7 +399,7 @@ export function useMapView(opts: UseMapViewOptions) {
     const built = buildMapPoints(sourceRows, detection, {
       coordOrder: m.coordOrder,
       coordSystem: m.coordSystem,
-      targetSystem: targetSystemOf(sourceOf() === 'baidu' ? 'baidu' : 'amap'),
+      targetSystem: coordTarget(),
       rowKey: opts.rowKey(),
     });
     const ctx = categoryCtx();
@@ -420,7 +429,7 @@ export function useMapView(opts: UseMapViewOptions) {
     const built = buildMapPoints(rows, detection, {
       coordOrder: m.coordOrder,
       coordSystem: m.coordSystem,
-      targetSystem: targetSystemOf(sourceOf() === 'baidu' ? 'baidu' : 'amap'),
+      targetSystem: coordTarget(),
       rowKey: opts.rowKey(),
     });
     const ctx = categoryCtx();
@@ -530,7 +539,7 @@ export function useMapView(opts: UseMapViewOptions) {
     const built = buildMapPoints([row], detection, {
       coordOrder: m.coordOrder,
       coordSystem: m.coordSystem,
-      targetSystem: targetSystemOf(sourceOf() === 'baidu' ? 'baidu' : 'amap'),
+      targetSystem: coordTarget(),
       rowKey: opts.rowKey(),
     });
     return built.points[0] ?? null;
@@ -598,7 +607,7 @@ export function useMapView(opts: UseMapViewOptions) {
     const m = opts.mapping();
     const b = adapter?.getBounds();
     if (!m || !b) return null;
-    const target = targetSystemOf(sourceOf() === 'baidu' ? 'baidu' : 'amap');
+    const target = coordTarget();
     return pickDataCoord((b.minLng + b.maxLng) / 2, (b.minLat + b.maxLat) / 2, m, target);
   }
 
@@ -756,7 +765,7 @@ export function useMapView(opts: UseMapViewOptions) {
     adapter.addPoints([
       { id: PICK_MARKER_ID, lng, lat, style: { icon: DEFAULT_ICON, color: DEFAULT_COLOR } },
     ]);
-    const target = targetSystemOf(sourceOf() === 'baidu' ? 'baidu' : 'amap');
+    const target = coordTarget();
     const c = pickDataCoord(lng, lat, m, target);
     opts.onPick?.(c.lng, c.lat);
   }
@@ -848,6 +857,7 @@ export function useMapView(opts: UseMapViewOptions) {
     // 并发守卫：异步创建期间若再次进入（源/数据变更），旧构建完成后自我销毁，避免双实例挂载与 SDK 监听泄漏
     const seq = ++buildSeq;
     destroyAdapter();
+    basemapWarning.value = '';
     const m = opts.mapping();
     const src = sourceOf();
     try {
@@ -861,14 +871,21 @@ export function useMapView(opts: UseMapViewOptions) {
       } else if (src) {
         const cfg = appStore.mapConfig;
         if (!cfg.key) return;
-        const maker =
-          src === 'amap' ? createAmapAdapter : src === 'baidu' ? createBaiduAdapter : createTencentAdapter;
-        created = await maker({
+        const makers: Record<MapProviderKind, (o: MapAdapterOptions) => Promise<MapAdapter>> = {
+          amap: createAmapAdapter,
+          baidu: createBaiduAdapter,
+          tencent: createTencentAdapter,
+          tianditu: createTiandituAdapter,
+        };
+        created = await makers[src]({
           key: cfg.key,
           scriptUrl: cfg.scriptUrl || undefined,
           zoom: initZoom,
           center: initCenter,
           dark: isDarkTheme(),
+          onBasemapError: (msg) => {
+            basemapWarning.value = msg;
+          },
         });
       } else {
         return;
@@ -1065,6 +1082,7 @@ export function useMapView(opts: UseMapViewOptions) {
   return {
     ready,
     error,
+    basemapWarning,
     initializing,
     zoom,
     drawnCount,

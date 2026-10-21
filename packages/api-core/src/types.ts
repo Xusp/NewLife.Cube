@@ -356,7 +356,7 @@ export interface SecurityConfig {
 
 /** 地图配置（CubeSetting 系统级单服务商；Provider 为空串=未配置） */
 export interface MapConfigModel {
-  /** 服务商：amap 高德 / baidu 百度 / tencent 腾讯；空串=未配置 */
+  /** 服务商：amap 高德 / baidu 百度 / tencent 腾讯 / tianditu 天地图；空串=未配置 */
   provider: string;
   /** JS API Key */
   key: string;

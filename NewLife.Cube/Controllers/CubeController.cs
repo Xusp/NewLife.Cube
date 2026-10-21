@@ -561,7 +561,7 @@ public class CubeController(PageService pageService, TokenService tokenService, 
     }
 
     /// <summary>获取地图配置。前端地图散点视图加载 JS API 所需的服务商与密钥，由 CubeSetting 配置；未配置时 Provider 为空串</summary>
-    /// <returns>返回 MapProvider 服务商（amap/baidu/tencent）、MapKey 密钥与 MapScriptUrl 自定义脚本地址</returns>
+    /// <returns>返回 MapProvider 服务商（amap/baidu/tencent/tianditu）、MapKey 密钥与 MapScriptUrl 自定义脚本地址</returns>
     [HttpGet]
     public ActionResult GetMapConfig()
     {

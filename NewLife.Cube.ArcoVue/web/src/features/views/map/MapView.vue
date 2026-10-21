@@ -65,6 +65,7 @@
       :container-width="size.w"
       :container-height="size.h"
     />
+    <div v-if="basemapWarning" class="map-view__warn">{{ basemapWarning }}</div>
     <div v-if="initializing" class="map-view__notice">
       <a-spin dot />
     </div>
@@ -133,6 +134,7 @@ const canvasRef = ref<HTMLElement | null>(null);
 const {
   ready,
   error,
+  basemapWarning,
   initializing,
   zoom,
   drawnCount,
@@ -282,6 +284,11 @@ body[arco-theme='dark'] .map-results__item.is-active {
   /* 隔离第三方 SDK 内部层级：腾讯 GL 覆盖容器 z-index 达 1000（内含 marker 层 101），
      会盖住工具栏/定位按钮/比例尺（15）并被其吃掉点击；画布建独立堆叠上下文后内部层级不外溢 */
   z-index: 0;
+}
+/* 天地图默认缩放/比例尺与自有工具条重复；版权信息保留 */
+.map-view__canvas :deep(.tdt-control-zoom),
+.map-view__canvas :deep(.tdt-control-scale) {
+  display: none;
 }
 .map-view__locate {
   position: absolute;
@@ -441,5 +448,18 @@ body[arco-theme='dark'] .map-results__item.is-active {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+.map-view__warn {
+  position: absolute;
+  left: 12px;
+  right: 220px;
+  bottom: 12px;
+  z-index: 16;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  color: rgb(var(--danger-6));
+  font-size: 12px;
+  line-height: 1.5;
 }
 </style>

@@ -61,8 +61,8 @@ export type CalendarMapping = {
   titleField: string;
   colorField?: string;
 };
-/** 地图提供商（系统级单服务商：高德/百度/腾讯；不随视图保存） */
-export type MapProvider = 'amap' | 'baidu' | 'tencent';
+/** 地图提供商（系统级单服务商：高德/百度/腾讯/天地图；不随视图保存） */
+export type MapProvider = 'amap' | 'baidu' | 'tencent' | 'tianditu';
 /** 分类样式规则：值 → 图标 / 颜色（≤50 条） */
 export interface MapCategoryRule {
   value: string;

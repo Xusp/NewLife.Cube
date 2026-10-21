@@ -1,7 +1,7 @@
 /**
  * 地图标记 DOM（OSC-261004d7f4）
  *
- * 标记视觉 = IconPark 图标（分类规则命中）+ 分类颜色，供三端覆盖物 content 复用。
+ * 标记视觉 = IconPark 图标（分类规则命中）+ 分类颜色，供各端覆盖物 content 复用。
  * 样式类 `cube-map-marker` 定义在 MapView.vue 的全局样式中（SDK 管理的 DOM 在组件树外）。
  */
 import { h, render } from 'vue';

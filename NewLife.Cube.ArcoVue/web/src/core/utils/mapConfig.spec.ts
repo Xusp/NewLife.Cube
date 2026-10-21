@@ -13,8 +13,9 @@ describe('parseMapConfig', () => {
     expect(r).toEqual({ provider: 'baidu', key: 'k2', scriptUrl: '' });
   });
 
-  it('tencent 有效；未知服务商视为未配置', () => {
+  it('tencent / tianditu 有效；未知服务商视为未配置', () => {
     expect(parseMapConfig({ provider: 'tencent', key: 'k' }).provider).toBe('tencent');
+    expect(parseMapConfig({ provider: 'tianditu', key: 'tk' }).provider).toBe('tianditu');
     expect(parseMapConfig({ provider: 'gaode', key: 'k' })).toEqual(DEFAULT_MAP_CONFIG);
   });
 

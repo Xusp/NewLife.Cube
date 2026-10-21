@@ -120,10 +120,11 @@ describe('matchFormatRule', () => {
 });
 
 describe('targetSystemOf', () => {
-  it('高德/腾讯 GCJ02，百度 BD09', () => {
+  it('高德/腾讯 GCJ02，百度 BD09，天地图 WGS84', () => {
     expect(targetSystemOf('amap')).toBe('gcj02');
     expect(targetSystemOf('tencent')).toBe('gcj02');
     expect(targetSystemOf('baidu')).toBe('bd09');
+    expect(targetSystemOf('tianditu')).toBe('wgs84');
   });
 });
 

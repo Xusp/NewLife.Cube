@@ -1,7 +1,7 @@
 /**
  * 地图 JS API 动态加载（OSC-261004d7f4）
  *
- * - 服务商默认地址：高德 v2.0 / 百度 v3.0 / 腾讯 gljs v1.exp
+ * - 服务商默认地址：高德 v2.0 / 百度 v3.0 / 腾讯 gljs v1.exp / 天地图 JS API 4.0
  * - 同地址去重（并发调用复用同一 Promise）；加载超时 15s
  * - 支持 CubeSetting.MapScriptUrl 覆盖默认地址（内网代理/私有化部署）
  */
@@ -16,6 +16,7 @@ const GLOBAL_NAMES: Record<MapProviderKind, string> = {
   amap: 'AMap',
   baidu: 'BMap',
   tencent: 'TMap',
+  tianditu: 'T',
 };
 
 /** SDK 全局对象名（用于就绪检查） */
@@ -31,6 +32,8 @@ function defaultUrl(provider: MapProviderKind, key: string): string {
       return `https://api.map.baidu.com/api?v=3.0&ak=${encodeURIComponent(key)}`;
     case 'tencent':
       return `https://map.qq.com/api/gljs?v=1.exp&key=${encodeURIComponent(key)}`;
+    case 'tianditu':
+      return `https://api.tianditu.gov.cn/api?v=4.0&tk=${encodeURIComponent(key)}`;
   }
 }
 

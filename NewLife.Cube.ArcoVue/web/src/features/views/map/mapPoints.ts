@@ -31,15 +31,19 @@ export interface MapMarkerStyle {
   color: string;
 }
 
-/** 目标底图坐标系：高德/腾讯 GCJ-02，百度 BD-09 */
-export function targetSystemOf(provider: string): 'gcj02' | 'bd09' {
-  return provider === 'baidu' ? 'bd09' : 'gcj02';
+/** 目标底图坐标系：高德/腾讯 GCJ-02，百度 BD-09，天地图 CGCS2000（按 WGS-84 换算） */
+export type MapTargetSystem = 'gcj02' | 'bd09' | 'wgs84';
+
+export function targetSystemOf(provider: string): MapTargetSystem {
+  if (provider === 'baidu') return 'bd09';
+  if (provider === 'tianditu') return 'wgs84';
+  return 'gcj02';
 }
 
 export interface BuildPointsOptions {
   coordOrder?: CoordOrder;
   coordSystem?: CoordSystem;
-  targetSystem?: 'gcj02' | 'bd09';
+  targetSystem?: MapTargetSystem;
   rowKey: string;
 }
 
@@ -174,13 +178,13 @@ export function resolveMarkerStyle(
 
 /**
  * 拾取坐标换算（地图添加记录）：目标底图坐标系 → 数据坐标系（写库用），数值圆整到 6 位。
- * 地图点击返回的是底图系统坐标（高德/腾讯 GCJ-02、百度 BD-09），写库前需换算回 mapping 配置的数据坐标系。
+ * 地图点击返回的是底图系统坐标（高德/腾讯 GCJ-02、百度 BD-09、天地图 WGS-84），写库前需换算回 mapping 配置的数据坐标系。
  */
 export function pickDataCoord(
   lng: number,
   lat: number,
   mapping: MapMapping,
-  targetSystem: 'gcj02' | 'bd09',
+  targetSystem: MapTargetSystem,
 ): LngLat {
   const r6 = (v: number) => Math.round(v * 1e6) / 1e6;
   const to = mapping.coordSystem ?? 'gcj02';

@@ -1,6 +1,6 @@
-/** GetMapConfig 响应解析。系统级单服务商：高德amap / 百度baidu / 腾讯tencent；未配置时 provider 为 null。 */
+/** GetMapConfig 响应解析。系统级单服务商：高德amap / 百度baidu / 腾讯tencent / 天地图tianditu；未配置时 provider 为 null。 */
 
-export type MapProviderKind = 'amap' | 'baidu' | 'tencent';
+export type MapProviderKind = 'amap' | 'baidu' | 'tencent' | 'tianditu';
 
 export interface MapSetting {
   /** 服务商；null=系统未配置地图 */
@@ -17,7 +17,7 @@ export const DEFAULT_MAP_CONFIG: MapSetting = {
   scriptUrl: '',
 };
 
-const VALID_PROVIDERS: readonly MapProviderKind[] = ['amap', 'baidu', 'tencent'];
+const VALID_PROVIDERS: readonly MapProviderKind[] = ['amap', 'baidu', 'tencent', 'tianditu'];
 
 function asRecord(v: unknown): Record<string, unknown> | null {
   if (v && typeof v === 'object' && !Array.isArray(v)) return v as Record<string, unknown>;

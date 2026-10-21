@@ -1,8 +1,8 @@
 /**
  * 地图适配层接口（OSC-261004d7f4）
  *
- * 目标：MapView 只依赖本接口，不感知 高德/百度/腾讯 SDK 差异。
- * 坐标约定：进入适配层的经纬度均为「目标底图坐标系」（高德/腾讯 GCJ-02、百度 BD-09），
+ * 目标：MapView 只依赖本接口，不感知 高德/百度/腾讯/天地图 SDK 差异。
+ * 坐标约定：进入适配层的经纬度均为「目标底图坐标系」（高德/腾讯 GCJ-02、百度 BD-09、天地图 CGCS2000≈WGS-84），
  * 由 mapPoints.buildMapPoints 完成数据坐标系 → 目标坐标系的换算。
  */
 import type { MapMarkerStyle } from './mapPoints';
@@ -26,6 +26,8 @@ export interface MapAdapterOptions {
   center?: [number, number];
   /** 深色底图（跟随系统暗色主题；不支持的端降级为标准底图） */
   dark?: boolean;
+  /** 底图瓦片加载失败（只通知一次）。天地图服务器端密钥会在浏览器侧被拒 */
+  onBasemapError?: (message: string) => void;
 }
 
 export interface MapAdapter {
@@ -68,7 +70,7 @@ export function clampZoom(z: number): number {
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, n));
 }
 
-/** 由包围盒推算中心与缩放（fit 的三端统一实现，避免各 SDK 适配差异） */
+/** 由包围盒推算中心与缩放（fit 的各端统一实现，避免各 SDK 适配差异） */
 export function viewForBounds(b: LngLatBounds): { center: [number, number]; zoom: number } {
   const center: [number, number] = [(b.minLng + b.maxLng) / 2, (b.minLat + b.maxLat) / 2];
   const span = Math.max(b.maxLng - b.minLng, (b.maxLat - b.minLat) * 1.4, 0.01);
