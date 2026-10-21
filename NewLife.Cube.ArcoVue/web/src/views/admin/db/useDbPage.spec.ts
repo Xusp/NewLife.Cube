@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { dbEntityNameText, dbEntityRemarkText, dbItemOf, mergeDbEntityRows } from './useDbPage';
+import {
+  dbCountOverflow,
+  dbCountText,
+  dbEntityNameText,
+  dbEntityRemarkText,
+  dbItemOf,
+  mergeDbEntityRows,
+} from './useDbPage';
 
 describe('useDbPage 纯函数', () => {
   it('dbItemOf 兼容 PascalCase/camelCase 并丢弃无名称行', () => {
@@ -43,6 +50,15 @@ describe('useDbPage 纯函数', () => {
       count: 7,
       pureTable: true,
     });
+  });
+
+  it('行数：十万级完整展示，更长标记为溢出', () => {
+    expect(dbCountText(null)).toBe('-');
+    expect(dbCountText(46565)).toBe('46565');
+    expect(dbCountText(100000)).toBe('100000');
+    expect(dbCountOverflow(null)).toBe(false);
+    expect(dbCountOverflow(999999)).toBe(false);
+    expect(dbCountOverflow(1000000)).toBe(true);
   });
 
   it('纯表无描述时备注显示占位说明', () => {

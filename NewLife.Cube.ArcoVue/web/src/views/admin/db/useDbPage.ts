@@ -63,6 +63,21 @@ export function dbEntityNameText(record: DbCountItem): string {
   return splitDbDescription(record.name, record.description).name;
 }
 
+/** 行数列内完整展示的位数：十万级（100000–999999） */
+const DB_COUNT_INLINE_DIGITS = 6;
+
+/** 行数展示文本；无统计为「-」 */
+export function dbCountText(count: number | null | undefined): string {
+  if (count == null || Number.isNaN(count)) return '-';
+  return String(count);
+}
+
+/** 超过十万级时不在格内折行，改由 Tooltip 展示完整数字 */
+export function dbCountOverflow(count: number | null | undefined): boolean {
+  const text = dbCountText(count);
+  return text !== '-' && text.length > DB_COUNT_INLINE_DIGITS;
+}
+
 /** 实体行备注：描述首个「。」之后的余下部分；纯表无描述时显示占位说明 */
 export function dbEntityRemarkText(record: DbCountItem): string {
   const remark = splitDbDescription(record.name, record.description).remark;
@@ -291,6 +306,8 @@ export function useDbPage() {
     openDrawer,
     openDictionary,
     backToEntities,
+    dbCountOverflow,
+    dbCountText,
     dbEntityNameText,
     dbEntityRemarkText,
     confirmCompact,

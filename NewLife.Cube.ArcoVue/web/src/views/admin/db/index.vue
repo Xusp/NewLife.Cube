@@ -121,7 +121,7 @@
         <div v-else>
           <a-empty v-if="!drawerRows.length" description="无数据" />
           <!-- 列必须声明在 #columns 插槽：默认插槽会被 Arco 当作裸 <table> 内容渲染，列不注册导致表格空白（OSC-2610012e35） -->
-          <a-table v-else :data="drawerRows" :pagination="false" size="small" :scroll="{ x: 680 }">
+          <a-table v-else :data="drawerRows" :pagination="false" size="small" :scroll="{ x: 722 }">
             <template #columns>
               <!-- 显示名=描述首句（点击进入数据字典）；备注=描述余下部分，置于最后一列 -->
               <a-table-column title="显示名" :width="140" :ellipsis="true" tooltip>
@@ -130,8 +130,13 @@
                 </template>
               </a-table-column>
               <a-table-column title="表名" :width="150" :ellipsis="true" tooltip data-index="tableName" />
-              <a-table-column title="行数" :width="72" align="right">
-                <template #cell="{ record }">{{ record.count ?? '-' }}</template>
+              <!-- 112 = 6 位数字 + 单元格左右 16px 内边距，十万级不折行 -->
+              <a-table-column title="行数" :width="112" align="right">
+                <template #cell="{ record }">
+                  <a-tooltip :content="dbCountText(record.count)" :disabled="!dbCountOverflow(record.count)">
+                    <span class="db-count">{{ dbCountText(record.count) }}</span>
+                  </a-tooltip>
+                </template>
               </a-table-column>
               <a-table-column title="备注" :width="320" :ellipsis="true" tooltip>
                 <template #cell="{ record }">{{ dbEntityRemarkText(record) }}</template>
@@ -175,6 +180,8 @@ const {
   openDrawer,
   openDictionary,
   backToEntities,
+  dbCountOverflow,
+  dbCountText,
   dbEntityNameText,
   dbEntityRemarkText,
   confirmCompact,
@@ -236,6 +243,13 @@ const {
 }
 /* 数据字典表头不折行（如「允许空」）；数字列右对齐由列 align 控制 */
 .db-drawer-content :deep(.arco-table-th) {
+  white-space: nowrap;
+}
+/* 行数超过列宽时省略，不折行；完整数字由 Tooltip 展示 */
+.db-count {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 </style>
