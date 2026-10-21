@@ -83,3 +83,50 @@ export function bucketInboxByDate<T extends { createTime?: unknown }>(
     items: buckets.get(k)!,
   }));
 }
+
+const AXIS_TIME = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/;
+
+/** 两条通知是否同一日历日。无法解析时不算同一天。 */
+export function inboxSameCalendarDay(a: string, b: string): boolean {
+  const da = /^(\d{4}-\d{2}-\d{2})/.exec(a.trim());
+  const db = /^(\d{4}-\d{2}-\d{2})/.exec(b.trim());
+  if (!da || !db) return false;
+  return da[1] === db[1];
+}
+
+/** 时间轴上是否为当天第一条（没有上一条，或与上一条不是同一天）。 */
+export function inboxAxisFirstOfDay(prevTime: string | undefined, timeText: string): boolean {
+  if (!prevTime) return true;
+  return !inboxSameCalendarDay(prevTime, timeText);
+}
+
+/**
+ * 通知上方的短时间。同一天第一条显示 MM-DD HH:mm，其余只显示 HH:mm。
+ * 入参为 formatDateTime 的「YYYY-MM-DD HH:mm:ss」；无法识别时原样返回。
+ */
+export function inboxAxisLabel(timeText: string, firstOfDay: boolean): string {
+  const m = AXIS_TIME.exec(timeText.trim());
+  if (!m) return timeText;
+  if (firstOfDay) return `${m[2]}-${m[3]} ${m[4]}:${m[5]}`;
+  return `${m[4]}:${m[5]}`;
+}
+
+/** 站内信 Action → 类型名。未知值原样返回，空值视为通知。 */
+const INBOX_TYPE_LABEL: Record<string, string> = {
+  mention: '提及',
+  workflow: '流程',
+  notify: '通知',
+};
+
+export function inboxTypeLabel(action?: string): string {
+  const raw = (action || '').trim();
+  if (!raw) return '通知';
+  return INBOX_TYPE_LABEL[raw.toLowerCase()] || raw;
+}
+
+/** 时间轴节点徽标：类型名的首字符。拉丁字母取大写。 */
+export function inboxTypeInitial(action?: string): string {
+  const label = inboxTypeLabel(action);
+  const ch = [...label][0] || '通';
+  return ch >= 'a' && ch <= 'z' ? ch.toUpperCase() : ch;
+}

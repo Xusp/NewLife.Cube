@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { bucketInboxByDate } from './inboxBucket';
+import {
+  bucketInboxByDate,
+  inboxAxisFirstOfDay,
+  inboxAxisLabel,
+  inboxSameCalendarDay,
+  inboxTypeInitial,
+  inboxTypeLabel,
+} from './inboxBucket';
 
 type Row = { id: number; createTime?: string };
 
@@ -74,5 +81,33 @@ describe('bucketInboxByDate', () => {
 
     expect(groups).toHaveLength(1);
     expect(groups[0].key).toBe('week');
+  });
+});
+
+describe('inboxAxisLabel', () => {
+  it('同一天第一条显示月日和时分，其余只显示时分', () => {
+    expect(inboxSameCalendarDay('2026-09-24 12:54:37', '2026-09-24 09:01:00')).toBe(true);
+    expect(inboxSameCalendarDay('2026-09-24 12:54:37', '2026-09-23 12:54:37')).toBe(false);
+    expect(inboxAxisFirstOfDay(undefined, '2026-09-24 12:54:37')).toBe(true);
+    expect(inboxAxisFirstOfDay('2026-09-24 18:00:00', '2026-09-24 12:54:37')).toBe(false);
+    expect(inboxAxisFirstOfDay('2026-09-24 18:00:00', '2026-09-23 12:54:37')).toBe(true);
+
+    expect(inboxAxisLabel('2026-09-24 12:54:37', true)).toBe('09-24 12:54');
+    expect(inboxAxisLabel('2026-09-24 12:54:37', false)).toBe('12:54');
+    expect(inboxAxisLabel('', true)).toBe('');
+    expect(inboxAxisLabel('无效', false)).toBe('无效');
+  });
+});
+
+describe('inboxTypeInitial', () => {
+  it('徽标取类型首字', () => {
+    expect(inboxTypeLabel('Mention')).toBe('提及');
+    expect(inboxTypeLabel('workflow')).toBe('流程');
+    expect(inboxTypeLabel('')).toBe('通知');
+    expect(inboxTypeInitial('Mention')).toBe('提');
+    expect(inboxTypeInitial('Workflow')).toBe('流');
+    expect(inboxTypeInitial('Notify')).toBe('通');
+    expect(inboxTypeInitial('alert')).toBe('A');
+    expect(inboxTypeInitial('')).toBe('通');
   });
 });

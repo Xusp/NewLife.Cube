@@ -10,7 +10,7 @@ import { useAppStore } from '@/stores/app';
 
 export type InboxRow = InboxMessageItem & { timeText: string };
 
-/** 站内通知抽屉：按日期分桶的时间轴列表（今天/本周/本月/更长时间） + 已读 + 可解析 target 跳转 */
+/** 站内通知抽屉：按日期分桶的双层时间轴（今天/本周/本月/更长时间） + 已读 + 可解析 target 跳转 */
 export function useInboxDrawer(visible: { value: boolean }) {
   const router = useRouter();
   const appStore = useAppStore();
