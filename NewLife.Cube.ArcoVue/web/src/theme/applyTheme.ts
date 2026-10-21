@@ -1,4 +1,5 @@
 import type { ThemePrefs } from '@/core/utils/userProfile';
+import { notifyDensityApplied } from './densityLayout';
 import { buildThemeTokens } from './tokens';
 
 const DENSITY_CLASSES = ['cube-density-default', 'cube-density-compact'];
@@ -58,6 +59,7 @@ export function applyTheme(theme: ThemePrefs, prefersDark = prefersDarkNow()): v
 
   for (const c of DENSITY_CLASSES) root.classList.remove(c);
   root.classList.add(tokens.densityClass);
+  notifyDensityApplied();
 }
 
 /** 监听系统外观；appearance=system 时自动重应用 */

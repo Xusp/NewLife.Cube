@@ -1,22 +1,45 @@
-/* 密度：由 applyTheme 挂到 html 的 cube-density-* class */
+/* 密度：由 applyTheme 挂到 html 的 cube-density-* class。
+   默认档必须显式放宽：页面里大量 size=small/mini，只「不覆盖」时默认档反而更紧。
+   紧凑档只收紧，不能把 mini 按钮（24px）撑到 28px，也不能在 td 上再垫一层 padding
+   （Arco 内边距在 .arco-table-cell，td 再加 padding 会把行撑高）。 */
+html.cube-density-default {
+  --cube-density-gap: 16px;
+  --cube-density-control-height: 32px;
+  --cube-density-row-height: 48px;
+  --cube-density-cell-pad-y: 12px;
+  --cube-density-cell-pad-x: 12px;
+}
+
 html.cube-density-compact {
   --cube-density-gap: 8px;
   --cube-density-control-height: 28px;
+  --cube-density-row-height: 32px;
+  --cube-density-cell-pad-y: 4px;
+  --cube-density-cell-pad-x: 8px;
 }
 
-html.cube-density-compact .arco-btn {
+html.cube-density-default .arco-table-cell {
+  padding: var(--cube-density-cell-pad-y) var(--cube-density-cell-pad-x);
+}
+
+html.cube-density-compact .arco-btn-size-medium {
   height: var(--cube-density-control-height);
   padding: 0 10px;
   font-size: 13px;
 }
 
-html.cube-density-compact .arco-table-th,
-html.cube-density-compact .arco-table-td {
-  padding-top: 6px;
-  padding-bottom: 6px;
+html.cube-density-compact .arco-table-cell {
+  padding: var(--cube-density-cell-pad-y) var(--cube-density-cell-pad-x);
 }
 
-html.cube-density-default {
-  --cube-density-gap: 16px;
-  --cube-density-control-height: 32px;
+html.cube-density-default .arco-menu-item,
+html.cube-density-default .arco-menu-inline-header,
+html.cube-density-default .arco-menu-pop-header {
+  line-height: 40px;
+}
+
+html.cube-density-compact .arco-menu-item,
+html.cube-density-compact .arco-menu-inline-header,
+html.cube-density-compact .arco-menu-pop-header {
+  line-height: 32px;
 }

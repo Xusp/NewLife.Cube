@@ -17,6 +17,7 @@ import { wfRowCanStart, wfRowEditLocked, wfRowInstanceId, wfRowStatus } from '@/
 import { BADGE_BORDER_RADIUS, BADGE_PADDING } from '@/core/utils/fieldBadge';
 import { getValueByKey } from '@/core/utils/url';
 import { colorFromSnapshot, readThemeSnapshot, themeColor } from '@/core/utils/themeColor';
+import { densityRevision, readDensityLayout } from '@/theme/densityLayout';
 import { customFreezeSides, freezeLineHeight, freezeLineXs } from './freezeLines';
 import { toVTableSortOption, vtableSortKey } from './vtableSortState';
 import {
@@ -1064,6 +1065,8 @@ export function useListTable(props: ListTableProps, emit: ListTableEmit) {
     // 多列排序：每一列都要有图标。multipleSort 让 VTable 保留数组，而不是只留最后一列。
     // 无排序必须是 []：null 会被包成 [null] 并在建表时抛错。
     const sortState = toVTableSortOption(props.sortState);
+    const density = readDensityLayout();
+    const cellPad: [number, number, number, number] = [density.padY, density.padX, density.padY, density.padX];
 
     return {
       records: withChecks(withTimeBucket(props.records)),
@@ -1105,6 +1108,8 @@ export function useListTable(props: ListTableProps, emit: ListTableEmit) {
             enableCheckboxCascade: true,
           }
         : {}),
+      defaultRowHeight: density.rowHeight,
+      defaultHeaderRowHeight: density.rowHeight,
       widthMode: 'standard',
       // 表宽有余量时摊给数据列；操作/勾选等 chrome 列用 maxWidth 钉死
       autoFillWidth: true,
@@ -1138,6 +1143,7 @@ export function useListTable(props: ListTableProps, emit: ListTableEmit) {
           color: paintColor('--color-text-1', '#1D2129'),
           borderColor: paintColor('--color-border-2', '#E5E6EB'),
           borderLineWidth: [1, 0, 0, 0],
+          padding: cellPad,
         },
         // 功能图标（展开/折叠箭头、排序等）颜色：VTable 默认 #141414 深黑，暗色下深底不可见
         // 读取 Arco 文字色 token，随亮/暗主题自动切换
@@ -1161,6 +1167,7 @@ export function useListTable(props: ListTableProps, emit: ListTableEmit) {
           color: paintColor('--color-text-2', '#4E5969'),
           fontWeight: 500,
           fontSize: 13,
+          padding: cellPad,
           borderColor: paintColor('--color-border-2', '#E5E6EB'),
           borderLineWidth: [1, 0, 0, 0],
         },
@@ -1170,6 +1177,7 @@ export function useListTable(props: ListTableProps, emit: ListTableEmit) {
           color: paintColor('--color-text-1', '#1D2129'),
           fontWeight: 600,
           fontSize: 13,
+          padding: cellPad,
           borderColor: paintColor('--color-border-2', '#E5E6EB'),
           borderLineWidth: [1, 0, 0, 0],
         },
@@ -1178,6 +1186,7 @@ export function useListTable(props: ListTableProps, emit: ListTableEmit) {
           color: paintColor('--color-text-1', '#1D2129'),
           fontWeight: 400,
           fontSize: 13,
+          padding: cellPad,
           borderColor: paintColor('--color-border-2', '#E5E6EB'),
           borderLineWidth: [1, 0, 0, 0],
           hover: {
@@ -1191,6 +1200,7 @@ export function useListTable(props: ListTableProps, emit: ListTableEmit) {
           color: paintColor('--color-text-1', '#1D2129'),
           fontWeight: 400,
           fontSize: 13,
+          padding: cellPad,
           borderColor: paintColor('--color-border-2', '#E5E6EB'),
           borderLineWidth: [1, 0, 0, 0],
           hover: {
@@ -1608,6 +1618,10 @@ export function useListTable(props: ListTableProps, emit: ListTableEmit) {
   // 排序必须单独监听：请求失败或行序未变时 records 引用不变，表头图标仍要跟上 sorts。
   // 用字符串签名比较，避免 toVTableSortOption 每次返回新数组导致 setRecords 循环。
   watch([() => props.records, () => vtableSortKey(props.sortState)], () => applyRecords());
+
+  watch(densityRevision, () => {
+    if (table) refreshOption();
+  });
 
   // 配置/交互能力/层级/分组变化：全量重建（updateOption）；sortState 由 applyRecords 写入 setRecords
   watch(
