@@ -422,13 +422,13 @@ public class CubeSetting : Config<CubeSetting>
     #endregion
 
     #region 地图
-    /// <summary>地图服务商。用于列表页地图散点视图，支持 高德amap / 百度baidu / 腾讯tencent / 天地图tianditu，留空表示未配置</summary>
-    [Description("地图服务商。支持 高德amap / 百度baidu / 腾讯tencent / 天地图tianditu，留空表示未配置地图功能")]
+    /// <summary>地图服务商。用于列表页地图散点视图，支持 高德amap / 百度baidu / 腾讯tencent，留空表示未配置</summary>
+    [Description("地图服务商。支持 高德amap / 百度baidu / 腾讯tencent，留空表示未配置地图功能")]
     [Category("地图")]
     public String MapProvider { get; set; }
 
-    /// <summary>地图服务商密钥。JS API Key，须与 MapProvider 匹配。天地图须填「浏览器端」tk，并在控制台把当前站点域名加入白名单；服务器端密钥无法在浏览器加载底图</summary>
-    [Description("地图服务商密钥。JS API Key（Key），须与 MapProvider 匹配。天地图须填「浏览器端」tk（服务器端密钥无法加载底图），并在控制台把当前站点域名加入白名单")]
+    /// <summary>地图服务商密钥。JS API Key，须与 MapProvider 匹配</summary>
+    [Description("地图服务商密钥。JS API Key（Key），须与 MapProvider 匹配")]
     [Category("地图")]
     public String MapKey { get; set; }
 

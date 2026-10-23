@@ -105,7 +105,8 @@ public class CubeController : ConfigController<CubeSetting>, IPageDataContext
             };
         }
 
-        // 地图服务商：系统级单服务商（高德/百度/腾讯/天地图），清空=未配置；下拉避免手输值出错
+        // 地图服务商：系统级单服务商（高德/百度/腾讯），清空=未配置；下拉避免手输值出错。
+        // 天地图适配仍保留，此处先从设置下拉隐藏。
         df = list.FirstOrDefault(e => e.Name == nameof(CubeSetting.MapProvider));
         if (df != null)
         {
@@ -115,7 +116,6 @@ public class CubeController : ConfigController<CubeSetting>, IPageDataContext
                 ["amap"] = "高德地图",
                 ["baidu"] = "百度地图",
                 ["tencent"] = "腾讯地图",
-                ["tianditu"] = "天地图",
             };
         }
     }
