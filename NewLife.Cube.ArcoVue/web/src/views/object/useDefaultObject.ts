@@ -305,7 +305,8 @@ export function useDefaultObject(props: DefaultObjectProps) {
     try {
       const normalized = serializeSubmitModel({ ...form }, fields.value);
       const merged = mergeObjectModel({ ...model }, normalized);
-      const res = await cubeApi.page.update(type, merged);
+      // 单对象页保存：PUT {type}（无主键），不能走按主键的 page.update
+      const res = await cubeApi.page.updateObject(type, merged);
       // 用返回对象刷新 model
       const body = unwrapData(res);
       if (body && typeof body === 'object' && !Array.isArray(body)) {

@@ -490,6 +490,13 @@ export function createPageApi(request: RequestFn, baseApiUrl?: string, metaCache
     getObject: (type: string) =>
       request<Record<string, unknown>>({ url: type, method: 'get' }),
 
+    /**
+     * 保存单对象页（ObjectController / ConfigController，如 魔方设置、核心设置）。
+     * 后端契约为 `PUT {type}` + 整个对象，**没有主键**，不能用按主键的 {@link update}。
+     */
+    updateObject: (type: string, data: Record<string, unknown>) =>
+      request<unknown>({ url: type, method: 'put', data }),
+
     /** 获取字段元数据 */
     getFields: (type: string, kind: FieldKind) =>
       request<DataField[]>({ url: `${type}/GetFields`, method: 'get', params: { kind } }),

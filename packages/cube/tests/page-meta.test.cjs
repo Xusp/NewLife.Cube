@@ -87,3 +87,32 @@ test('getPage: scope 隔离缓存，refresh 强制请求', async () => {
   await api.getPage('/Admin/Log', { refresh: true });
   assert.equal(calls, 3, 'refresh 应强制请求');
 });
+
+test('updateObject: 单对象页走 PUT {type}，不需要主键', async () => {
+  const calls = [];
+  const request = async (options) => {
+    calls.push(options);
+    return { code: 0, data: options.data };
+  };
+  const api = createPageApi(request);
+
+  await api.updateObject('/Admin/Core', { language: 'en' });
+
+  assert.equal(calls[0].url, '/Admin/Core');
+  assert.equal(calls[0].method, 'put');
+  assert.deepEqual(calls[0].data, { language: 'en' });
+});
+
+test('update: 实体按主键 PUT，缺主键直接报错（对象页须改用 updateObject）', async () => {
+  const calls = [];
+  const request = async (options) => {
+    calls.push(options);
+    return { code: 0 };
+  };
+  const api = createPageApi(request);
+
+  await api.update('/Admin/User', { Id: 7, Name: 'a' });
+  assert.equal(calls[0].url, '/Admin/User/7');
+
+  await assert.rejects(() => api.update('/Admin/User', { Name: 'a' }), /缺少主键/);
+});
