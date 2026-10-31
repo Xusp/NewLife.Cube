@@ -288,6 +288,15 @@ export interface PageMeta {
   /** 页面 UI 扩展。核心不解释，原样透传给前端 preset / 渲染器 */
   ui?: Record<string, unknown>;
 
+  /**
+   * 页面种类。单对象页（ObjectController / ConfigController，如 魔方设置）
+   * 的 /meta 只下发 entity + setting + form，expandPageMeta 会把它展开成
+   * editForm/addForm，届时无法再靠数组是否存在区分，故显式标记。
+   */
+  pageKind?: 'entity' | 'object';
+  /** 单对象页的原始表单字段（expandPageMeta 后仍保留，便于对象页直接消费） */
+  form?: DataField[];
+
   /** 兼容旧结构：fields 嵌套 */
   fields?: {
     list?: DataField[];

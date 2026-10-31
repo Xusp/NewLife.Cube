@@ -34,6 +34,32 @@ test('expandPageMeta: add/detail 省略时回退 form', () => {
   assert.deepEqual(meta.detail.map((f) => f.name), ['Name']);
 });
 
+test('expandPageMeta: 单对象页（无 list/search）标记 pageKind=object 并保留 form', () => {
+  const form = [field('Title'), field('SpaSkin', { category: 'UI' })];
+  const meta = expandPageMeta({ entity: { name: 'CubeSetting' }, setting: {}, form });
+
+  // 对象页展开后 addForm/editForm 都是同一个 form，用数组判据已无法区分实体页，
+  // 因此必须显式打 pageKind 标记，前端据此渲染 DefaultObject
+  assert.equal(meta.pageKind, 'object');
+  assert.equal(meta.form, form);
+  assert.equal(meta.editForm, form);
+  assert.equal(meta.addForm, form);
+  assert.equal(meta.list, undefined);
+  assert.equal(meta.search, undefined);
+});
+
+test('expandPageMeta: 实体页不打 pageKind 标记', () => {
+  const meta = expandPageMeta({
+    entity: { name: 'User' },
+    list: [field('Id')],
+    form: [field('Name')],
+    search: [field('Name')],
+  });
+
+  assert.equal(meta.pageKind, undefined);
+  assert.equal(meta.form, undefined);
+});
+
 test('expandPageMeta: 旧服务端数组响应原样返回', () => {
   const legacy = { setting: {}, list: [field('Name')], editForm: [field('Name')] };
   assert.equal(expandPageMeta(legacy), legacy);

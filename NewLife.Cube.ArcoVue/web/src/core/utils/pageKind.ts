@@ -6,11 +6,14 @@
  * - custom：Admin/Db、Admin/File、Admin/Lov，以及 Auth/Sso/Mfa/AI/Automation/CubeController 等服务控制器
  *   （菜单可挂在任意 Area，如 /vTest1/Auth；无 GetPage）
  * - entity：/meta 返回 list/search/addForm 数组 → DefaultList
- * - object：/meta 返回 form 数组且无 list → DefaultObject（ObjectController 单对象配置页，如 魔方设置）
+ * - object：/meta 只回 form（含 expandPageMeta 展开后的 pageKind 标记）→ DefaultObject
+ *   （ObjectController 单对象配置页，如 魔方设置）
  * - unknown：全部失败 → a-empty
  *
  * 注：master 起 ObjectController 用 `GET {type}/meta` 下发 `{entity,setting,form}`，并移除了
- * `GET {type}/GetFields`，因此对象页必须由 meta 的 form 直接判定，不能再依赖 GetFields 双探。
+ * `GET {type}/GetFields`，因此对象页必须由 meta 判定，不能再依赖 GetFields 双探；
+ * 又因 `@newlifex/cube` 的 expandPageMeta 会把 form 摊成 addForm/editForm，故对象页判定
+ * 必须同时兼容展开后的 `pageKind` 标记，且要排在实体判定之前。
  */
 
 import { isServiceControllerPath } from './servicePage';
@@ -54,11 +57,14 @@ export function isValidEntityPageMeta(meta: unknown): boolean {
 /**
  * 单对象配置页判定（ObjectController / ConfigController）。
  *
- * 后端 `GET {type}/meta` 对单对象页只下发 `entity + setting + form`（无 list/search/addForm），
- * 因此 form 数组即为对象页的正向标记；且其 setting 对象不能被当成实体页证据。
+ * 两种形态都要认：
+ * - 原始 /meta：`entity + setting + form`（无 list/search/addForm）；
+ * - `expandPageMeta` 展开后：会把 form 摊成 addForm/editForm/detail，数组判据失效，
+ *   因此 api 层显式写入 `pageKind: 'object'`。
  */
 export function isObjectPageMeta(meta: unknown): boolean {
   if (!isPlainObjectLike(meta)) return false;
+  if (meta.pageKind === 'object') return true;
   if (!Array.isArray(meta.form)) return false;
   return (
     !Array.isArray(meta.list) && !Array.isArray(meta.search) && !Array.isArray(meta.addForm)
@@ -94,8 +100,9 @@ export async function detectPageKind(typePath: string, probes: PageKindProbes): 
   } catch {
     page = null;
   }
-  if (isValidEntityPageMeta(unwrap(page))) return 'entity';
+  // 对象页必须先判：expandPageMeta 会把 form 摊成 addForm/editForm，实体判据会误命中
   if (isObjectPageMeta(unwrap(page))) return 'object';
+  if (isValidEntityPageMeta(unwrap(page))) return 'entity';
 
   try {
     const { fields, body } = await probes.getObjectProbe(typePath);

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { expandPageMeta } from '@newlifex/cube';
 import { detectPageKind, isObjectPageMeta, isValidEntityPageMeta } from './pageKind';
 import type { PageKindProbes } from './pageKind';
 
@@ -51,6 +52,64 @@ describe('isObjectPageMeta', () => {
     expect(isObjectPageMeta({ list: [] })).toBe(false);
     expect(isObjectPageMeta('html')).toBe(false);
     expect(isObjectPageMeta(null)).toBe(false);
+  });
+
+  it('expandPageMeta 展开后的对象页（pageKind=object，form 已摊成 addForm）→ true', () => {
+    expect(
+      isObjectPageMeta({
+        setting: {},
+        entity: {},
+        pageKind: 'object',
+        form: [{ name: 'Title' }],
+        addForm: [{ name: 'Title' }],
+        editForm: [{ name: 'Title' }],
+        detail: [{ name: 'Title' }],
+      }),
+    ).toBe(true);
+  });
+});
+
+describe('detectPageKind · /meta 形态', () => {
+  it('原始对象页 meta（entity+setting+form）→ object', async () => {
+    const p = probes({
+      getPage: async () => ({ data: { entity: {}, setting: {}, form: [{ name: 'Title' }] } }),
+    });
+    expect(await detectPageKind('/Admin/Cube', p)).toBe('object');
+  });
+
+  it('api 层展开后的对象页（pageKind=object + addForm 数组）→ object，不误判实体', async () => {
+    const p = probes({
+      getPage: async () => ({
+        data: {
+          entity: {},
+          setting: {},
+          pageKind: 'object',
+          form: [{ name: 'Title' }],
+          addForm: [{ name: 'Title' }],
+          editForm: [{ name: 'Title' }],
+          detail: [{ name: 'Title' }],
+        },
+      }),
+    });
+    expect(await detectPageKind('/Admin/Cube', p)).toBe('object');
+  });
+
+  it('真实链路：后端 /api/Admin/Cube/meta 原始响应经 @newlifex/cube expandPageMeta 后仍判定为 object', async () => {
+    // 2026-10-31 从本机 /api/Admin/Cube/meta 抓到的真实结构（字段已裁剪）
+    const raw = {
+      entity: { name: 'CubeSetting', displayName: '魔方设置' },
+      setting: { enableNavbar: false, enableToolbar: true, isReadOnly: false, menuId: 24 },
+      form: [
+        { name: 'Debug', displayName: 'Debug', category: 'General', typeName: 'Boolean', required: false, virtual: true },
+        { name: 'Title', displayName: '标题', category: 'General', typeName: 'String', required: true, virtual: true },
+        { name: 'SpaSkin', displayName: 'SPA 皮肤', category: 'UI', typeName: 'String', required: false, virtual: true },
+      ],
+    };
+    const expanded = expandPageMeta(raw)!;
+    // 展开后 form 被摊成 addForm/editForm/detail，必须靠 pageKind 标记区分
+    expect(Array.isArray(expanded.addForm)).toBe(true);
+    const p = probes({ getPage: async () => ({ code: 0, data: expanded }) });
+    expect(await detectPageKind('/Admin/Cube', p)).toBe('object');
   });
 });
 

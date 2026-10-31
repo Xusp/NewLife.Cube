@@ -427,6 +427,14 @@ export function expandPageMeta(raw: unknown): PageMeta | undefined {
   if (meta.toolbar) result.toolbar = meta.toolbar;
   if (meta.ui) result.ui = meta.ui;
 
+  // 单对象页（ObjectController / ConfigController）：只下发 entity + setting + form，
+  // 没有 list/search/add。展开后 addForm/editForm 都是同一个 form 数组，无法再用
+  // 「有没有数组」区分实体页，故显式标记种类并保留原始 form 供对象页直接消费。
+  if (!meta.list && !meta.search && !meta.add) {
+    result.pageKind = 'object';
+    result.form = form;
+  }
+
   return result;
 }
 
