@@ -162,14 +162,20 @@ export function useDefaultObject(props: DefaultObjectProps) {
       Object.keys(model).forEach((k) => delete model[k]);
       Object.assign(model, obj);
 
-      const fres = await cubeApi.page.getFields(type, FieldKind.List);
-      const flist = unwrapData(fres);
-      const metas = toFieldMetas((Array.isArray(flist) ? flist : []) as never);
+      // 单对象页字段由 /meta 的 form 下发（ObjectController 已改为 meta 契约，GetFields 动作已移除）
+      const mres = await cubeApi.page.getPage(type);
+      const meta = unwrapData(mres) as Record<string, unknown> | null;
+      const formFields = Array.isArray(meta?.form)
+        ? meta.form
+        : Array.isArray(meta?.editForm)
+          ? meta.editForm
+          : [];
+      const metas = toFieldMetas(formFields as never);
       await enrichFieldsWithEnumDataSource(metas);
       await enrichFieldsWithLookup(metas);
       await enrichDefaultRoleField(metas, obj);
       fields.value = metas;
-      // GetFields 字段名为 PascalCase，GET 对象多为 camelCase；归一化后再绑 form[field.name]
+      // 字段名跟随 /meta 的 camelCase（兼容历史 PascalCase）；归一化后再绑 form[field.name]
       resetFormFrom(normalizeKeysByFields(obj, metas));
       // 分组就绪后默认选中第一个分组（多分组子菜单）；无分组回落空串
       activeCategory.value = groups.value[0]?.category ?? '';

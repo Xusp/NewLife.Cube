@@ -5,9 +5,12 @@
  * - home：Admin/Index 短路（主页仪表盘，不请求任何探测）
  * - custom：Admin/Db、Admin/File、Admin/Lov，以及 Auth/Sso/Mfa/AI/Automation/CubeController 等服务控制器
  *   （菜单可挂在任意 Area，如 /vTest1/Auth；无 GetPage）
- * - entity：GetPage 返回有效实体元数据 → DefaultList
- * - object：GetPage 失败且 GetFields 为数组、GET body 为对象且非分页形 → DefaultObject
+ * - entity：/meta 返回 list/search/addForm 数组 → DefaultList
+ * - object：/meta 返回 form 数组且无 list → DefaultObject（ObjectController 单对象配置页，如 魔方设置）
  * - unknown：全部失败 → a-empty
+ *
+ * 注：master 起 ObjectController 用 `GET {type}/meta` 下发 `{entity,setting,form}`，并移除了
+ * `GET {type}/GetFields`，因此对象页必须由 meta 的 form 直接判定，不能再依赖 GetFields 双探。
  */
 
 import { isServiceControllerPath } from './servicePage';
@@ -36,16 +39,29 @@ function isPlainObjectLike(v: unknown): v is Record<string, unknown> {
 
 /**
  * 有效实体元数据判定（design §2.2 真值表）：
- * 非 null 对象且下列至少一项成立：list/search/addForm 为数组，或 setting 为对象。
+ * 非 null 对象且 list / search / addForm 至少一项为数组。
+ * 兼容旧形态：仅带 setting（无 form）的对象仍按实体页处理。
  * 字符串 / 数组根 / `code`+`message` 且无 data 结构 → 假。
  */
 export function isValidEntityPageMeta(meta: unknown): boolean {
   if (!isPlainObjectLike(meta)) return false;
+  if (Array.isArray(meta.list) || Array.isArray(meta.search) || Array.isArray(meta.addForm)) {
+    return true;
+  }
+  return isPlainObjectLike(meta.setting) && !Array.isArray(meta.form);
+}
+
+/**
+ * 单对象配置页判定（ObjectController / ConfigController）。
+ *
+ * 后端 `GET {type}/meta` 对单对象页只下发 `entity + setting + form`（无 list/search/addForm），
+ * 因此 form 数组即为对象页的正向标记；且其 setting 对象不能被当成实体页证据。
+ */
+export function isObjectPageMeta(meta: unknown): boolean {
+  if (!isPlainObjectLike(meta)) return false;
+  if (!Array.isArray(meta.form)) return false;
   return (
-    Array.isArray(meta.list) ||
-    Array.isArray(meta.search) ||
-    Array.isArray(meta.addForm) ||
-    isPlainObjectLike(meta.setting)
+    !Array.isArray(meta.list) && !Array.isArray(meta.search) && !Array.isArray(meta.addForm)
   );
 }
 
@@ -79,6 +95,7 @@ export async function detectPageKind(typePath: string, probes: PageKindProbes): 
     page = null;
   }
   if (isValidEntityPageMeta(unwrap(page))) return 'entity';
+  if (isObjectPageMeta(unwrap(page))) return 'object';
 
   try {
     const { fields, body } = await probes.getObjectProbe(typePath);

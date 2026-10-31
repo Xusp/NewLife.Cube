@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectPageKind, isValidEntityPageMeta } from './pageKind';
+import { detectPageKind, isObjectPageMeta, isValidEntityPageMeta } from './pageKind';
 import type { PageKindProbes } from './pageKind';
 
 function probes(over: Partial<PageKindProbes> = {}): PageKindProbes {
@@ -13,11 +13,16 @@ function probes(over: Partial<PageKindProbes> = {}): PageKindProbes {
 }
 
 describe('isValidEntityPageMeta', () => {
-  it('list / search / addForm 数组或 setting 对象 → true', () => {
+  it('list / search / addForm 数组 → true', () => {
     expect(isValidEntityPageMeta({ list: [] })).toBe(true);
     expect(isValidEntityPageMeta({ search: [] })).toBe(true);
     expect(isValidEntityPageMeta({ addForm: [] })).toBe(true);
+  });
+
+  it('仅 setting（历史形态，无 form）→ true；带 form 的单对象页 → false', () => {
     expect(isValidEntityPageMeta({ setting: {} })).toBe(true);
+    expect(isValidEntityPageMeta({ setting: {}, form: [] })).toBe(false);
+    expect(isValidEntityPageMeta({ entity: {}, setting: {}, form: [{ name: 'X' }] })).toBe(false);
   });
 
   it('字符串 / 数组根 / code+message 无 data → false', () => {
@@ -26,6 +31,26 @@ describe('isValidEntityPageMeta', () => {
     expect(isValidEntityPageMeta({ code: 404, message: 'not found' })).toBe(false);
     expect(isValidEntityPageMeta(null)).toBe(false);
     expect(isValidEntityPageMeta({})).toBe(false);
+  });
+});
+
+describe('isObjectPageMeta', () => {
+  it('ObjectController /meta 形态（entity+setting+form，无 list）→ true', () => {
+    expect(isObjectPageMeta({ entity: {}, setting: {}, form: [{ name: 'Debug' }] })).toBe(true);
+    expect(isObjectPageMeta({ setting: {}, form: [] })).toBe(true);
+  });
+
+  it('实体元数据（带 list/search/addForm）→ false', () => {
+    expect(isObjectPageMeta({ setting: {}, form: [], list: [] })).toBe(false);
+    expect(isObjectPageMeta({ setting: {}, form: [], addForm: [] })).toBe(false);
+    expect(isObjectPageMeta({ setting: {}, form: [], search: [] })).toBe(false);
+  });
+
+  it('无 form / 非对象 → false', () => {
+    expect(isObjectPageMeta({ setting: {} })).toBe(false);
+    expect(isObjectPageMeta({ list: [] })).toBe(false);
+    expect(isObjectPageMeta('html')).toBe(false);
+    expect(isObjectPageMeta(null)).toBe(false);
   });
 });
 
@@ -80,6 +105,25 @@ describe('detectPageKind', () => {
   it('GetPage 有效元数据 → entity', async () => {
     const p = probes({ getPage: async () => ({ data: { list: [], setting: {} } }) });
     expect(await detectPageKind('/Admin/User', p)).toBe('entity');
+  });
+
+  it('GetPage 返回单对象元数据（entity+setting+form，无 list）→ object，不再双探', async () => {
+    let probed = false;
+    const p = probes({
+      getPage: async () => ({
+        data: {
+          entity: { name: 'CubeSetting' },
+          setting: { enableNavbar: false },
+          form: [{ name: 'Title' }, { name: 'SpaSkin' }],
+        },
+      }),
+      getObjectProbe: async () => {
+        probed = true;
+        return { fields: null, body: null };
+      },
+    });
+    expect(await detectPageKind('/Admin/Cube', p)).toBe('object');
+    expect(probed).toBe(false);
   });
 
   it('GetPage 失败 + 对象 GET → object', async () => {
