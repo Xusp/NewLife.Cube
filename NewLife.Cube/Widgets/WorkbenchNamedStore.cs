@@ -92,7 +92,7 @@ public static class WorkbenchNamedStore
     /// <param name="json">归一化后配置 JSON</param>
     public static void Save(String slug, String title, String json)
     {
-        if (!IsValidSlug(slug)) throw new ArgumentException("slug 非法", nameof(slug));
+        if (!IsValidSlug(slug)) throw new ArgumentException("Invalid slug", nameof(slug));
 
         var p = Parameter.GetOrAdd(0, Category, slug);
         p.Kind = ParameterKinds.String;
@@ -180,7 +180,7 @@ public static class WorkbenchNamedStore
     /// <param name="title">标题（≤40）</param>
     public static IMenu MountMenu(String slug, String title)
     {
-        if (!IsValidSlug(slug)) throw new ArgumentException("slug 非法", nameof(slug));
+        if (!IsValidSlug(slug)) throw new ArgumentException("Invalid slug", nameof(slug));
 
         var group = EnsureFirstGroup();
         var menu = FindMenu(slug);
@@ -220,7 +220,7 @@ public static class WorkbenchNamedStore
     /// <returns>父分组菜单行</returns>
     public static IMenu EnsureFirstGroup()
     {
-        if (Menu.Root is not IMenu root) throw new InvalidOperationException("菜单根不可用");
+        if (Menu.Root is not IMenu root) throw new InvalidOperationException("The menu root is unavailable");
 
         var rootMenus = root.Childs;
         var group = rootMenus.FirstOrDefault(e => e.Name == ParentName);

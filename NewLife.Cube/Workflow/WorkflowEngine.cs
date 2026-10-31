@@ -41,23 +41,23 @@ public static class WorkflowEngine
     /// <returns>新实例</returns>
     public static WorkflowInstance Start(WorkflowDefinition definition, IList<String> keys, Int32 starterId, String starterName, String comment, String summary = null, String title = null, IDictionary<String, List<Int32>> picks = null)
     {
-        if (definition == null) throw new WorkflowException(404, "流程定义不存在");
-        if (!definition.Published || !definition.Enable) throw new WorkflowException(400, "流程定义未发布或已停用");
+        if (definition == null) throw new WorkflowException(404, "Flow definition not found");
+        if (!definition.Published || !definition.Enable) throw new WorkflowException(400, "Flow definition is not published or is disabled");
 
         var typePath = AutomationPaths.NormalizeTypePath(definition.TypePath);
-        if (typePath.IsNullOrEmpty()) throw new WorkflowException(400, "流程定义实体路径为空");
+        if (typePath.IsNullOrEmpty()) throw new WorkflowException(400, "The flow definition entity path is empty");
 
         // 去重 + 上限
         var kk = keys?.Where(e => !e.IsNullOrEmpty()).Distinct().ToList() ?? [];
-        if (kk.Count == 0) throw new WorkflowException(400, "至少选择一条记录");
-        if (kk.Count > 100) throw new WorkflowException(400, "一次最多提交 100 条记录");
+        if (kk.Count == 0) throw new WorkflowException(400, "Select at least one record");
+        if (kk.Count > 100) throw new WorkflowException(400, "At most 100 records can be submitted at once");
 
         var factory = ResolveFactory(typePath);
         var pks = factory.Table?.PrimaryKeys ?? [];
-        if (pks == null || pks.Length != 1) throw new WorkflowException(400, "复合主键实体不支持审批");
+        if (pks == null || pks.Length != 1) throw new WorkflowException(400, "Entities with composite primary keys do not support approval");
         var pkName = pks[0].Name;
         var pkField = factory.Fields?.FirstOrDefault(e => e.Name.EqualIgnoreCase(pkName));
-        if (pkField == null) throw new WorkflowException(400, "无法识别实体主键");
+        if (pkField == null) throw new WorkflowException(400, "Cannot identify the entity primary key");
 
         // 解析发起条件
         var filter = AutomationFilter.ParseViewFilter(definition.StartFilter);
@@ -76,12 +76,12 @@ public static class WorkflowEngine
             var key = keys2[i];
             // 同一记录同时最多一条在途；已通过不可再次发起
             if (WorkflowSubject.FindRunning(typePath, key) != null)
-                throw new WorkflowException(409, $"记录[{key}]已有在途审批");
+                throw new WorkflowException(409, $"Record [{key}] already has an in-flight approval");
             if (WorkflowSubject.IsLatestApproved(typePath, key))
-                throw new WorkflowException(409, $"记录[{key}]已通过审批，不可再次发起");
+                throw new WorkflowException(409, $"Record [{key}] has already been approved and cannot be started again");
 
             var row = factory.FindByKey(NormalizeKey(kk[i], pkField));
-            if (row == null || (row as IEntity).IsNullKey) throw new WorkflowException(404, $"记录[{key}]不存在");
+            if (row == null || (row as IEntity).IsNullKey) throw new WorkflowException(404, $"Record [{key}] does not exist");
             rows.Add(row);
         }
 
@@ -91,14 +91,14 @@ public static class WorkflowEngine
             foreach (var row in rows)
             {
                 if (!AutomationFilter.Match(row, filter))
-                    throw new WorkflowException(400, "存在不满足发起条件的记录");
+                    throw new WorkflowException(400, "Some records do not meet the start conditions");
             }
         }
 
         // 发布快照合法
         var graph = WorkflowGraph.Parse(definition.PublishedGraphJson);
         if (graph == null || graph.Validate().Count > 0)
-            throw new WorkflowException(400, "流程定义发布图非法，无法发起");
+            throw new WorkflowException(400, "The published flow definition graph is invalid; cannot start");
 
         var tenantId = definition.TenantId;
         var now = DateTime.Now;
@@ -151,7 +151,7 @@ public static class WorkflowEngine
                 }
                 catch (Exception ex) when (ex.Message.Contains("UNIQUE", StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new WorkflowException(409, "已有在途审批");
+                    throw new WorkflowException(409, "An in-flight approval already exists");
                 }
             }
 
@@ -207,12 +207,12 @@ public static class WorkflowEngine
     /// <param name="userId">操作人</param>
     public static void Claim(Int64 taskId, Int32 userId)
     {
-        var task = WorkflowTask.FindById(taskId) ?? throw new WorkflowException(404, "任务不存在");
+        var task = WorkflowTask.FindById(taskId) ?? throw new WorkflowException(404, "Task does not exist");
         EnsureCandidate(task, userId);
         if (task.Status is not (WorkflowStatuses.Pending or WorkflowStatuses.Active))
-            throw new WorkflowException(409, "任务已结束，无法认领");
+            throw new WorkflowException(409, "The task has ended and cannot be claimed");
         if (task.AssigneeId > 0 && task.AssigneeId != userId)
-            throw new WorkflowException(409, "任务已被他人认领");
+            throw new WorkflowException(409, "The task has already been claimed by someone else");
 
         task.AssigneeId = userId;
         task.Status = WorkflowStatuses.Active;
@@ -231,14 +231,14 @@ public static class WorkflowEngine
         var instance = WorkflowInstance.FindById(task.InstanceId);
         var graph = ParseSnapshot(instance);
         var node = graph.Find(BaseNodeId(task.NodeId));
-        if (node != null && !node.AllowTransfer) throw new WorkflowException(403, "当前节点不允许转办");
+        if (node != null && !node.AllowTransfer) throw new WorkflowException(403, "The current node does not allow transfer");
 
         var ids = ResolveIds(to, task, null, out var single);
-        if (ids.Count == 0) throw new WorkflowException(400, "转办接收人为空");
-        if (!single) throw new WorkflowException(400, "转办仅支持单个用户");
+        if (ids.Count == 0) throw new WorkflowException(400, "The transfer recipient is empty");
+        if (!single) throw new WorkflowException(400, "Transfer supports a single user only");
 
         var targetId = ids.First();
-        if (targetId == userId) throw new WorkflowException(400, "不能转办给自己");
+        if (targetId == userId) throw new WorkflowException(400, "Cannot transfer to yourself");
 
         using var tran = WorkflowTask.Meta.CreateTrans();
         task.Status = WorkflowStatuses.Transferred;
@@ -267,7 +267,7 @@ public static class WorkflowEngine
     {
         var task = LoadOpenTask(taskId, userId, true);
         var ids = ResolveIds(to, task, null, out _);
-        if (ids.Count == 0) throw new WorkflowException(400, "知会接收人为空");
+        if (ids.Count == 0) throw new WorkflowException(400, "The cc recipient is empty");
 
         var instance = WorkflowInstance.FindById(task.InstanceId);
         foreach (var id in ids)
@@ -289,15 +289,15 @@ public static class WorkflowEngine
         var graph = ParseSnapshot(instance);
         // 当前节点须允许回退（与加签 allowAddSign 对称）
         var cur = graph.Find(task.NodeId);
-        if (cur == null || !cur.AllowRollback) throw new WorkflowException(403, "当前节点不允许回退");
+        if (cur == null || !cur.AllowRollback) throw new WorkflowException(403, "The current node does not allow rollback");
         var node = graph.Find(targetNodeId);
-        if (node == null || node.Type != WorkflowGraph.ApproveType) throw new WorkflowException(400, "回退目标必须是审批节点");
-        if (targetNodeId == task.NodeId) throw new WorkflowException(400, "不能回退到当前节点");
+        if (node == null || node.Type != WorkflowGraph.ApproveType) throw new WorkflowException(400, "The rollback target must be an approval node");
+        if (targetNodeId == task.NodeId) throw new WorkflowException(400, "Cannot roll back to the current node");
 
         // 已办过：目标节点存在 Done 任务
         var done = WorkflowTask.FindAll(WorkflowTask._.InstanceId == instance.Id & WorkflowTask._.NodeId == targetNodeId)
             .Any(e => e.Status == WorkflowStatuses.Done);
-        if (!done) throw new WorkflowException(400, "回退目标不是已办节点");
+        if (!done) throw new WorkflowException(400, "The rollback target is not a completed node");
 
         var downstream = graph.Downstream(targetNodeId);
         downstream.Add(task.NodeId);
@@ -334,11 +334,11 @@ public static class WorkflowEngine
         var graph = ParseSnapshot(instance);
         var node = graph.Find(task.NodeId);
         // 临时节点上不允许再加签
-        if (task.NodeId.Contains('#')) throw new WorkflowException(400, "加签节点不能再加签");
-        if (node == null || !node.AllowAddSign) throw new WorkflowException(403, "当前节点不允许加签");
+        if (task.NodeId.Contains('#')) throw new WorkflowException(400, "An add-sign node cannot add sign again");
+        if (node == null || !node.AllowAddSign) throw new WorkflowException(403, "The current node does not allow add-sign");
 
         var ids = ResolveIds(to, task, null, out _);
-        if (ids.Count == 0) throw new WorkflowException(400, "加签接收人为空");
+        if (ids.Count == 0) throw new WorkflowException(400, "The add-sign recipient is empty");
 
         using var tran = WorkflowTask.Meta.CreateTrans();
         var idx = 0;
@@ -389,9 +389,9 @@ public static class WorkflowEngine
     /// <param name="comment">意见</param>
     public static void Withdraw(Int64 instanceId, Int32 userId, String comment)    {
         var instance = LoadRunning(instanceId);
-        if (instance.StarterId != userId) throw new WorkflowException(403, "仅发起人可撤回");
+        if (instance.StarterId != userId) throw new WorkflowException(403, "Only the initiator can withdraw");
         if (WorkflowComment.FindAll(WorkflowComment._.InstanceId == instance.Id).Any(e => e.Action == "approve"))
-            throw new WorkflowException(409, "已有审批意见，不能撤回");
+            throw new WorkflowException(409, "An approval comment already exists; cannot withdraw");
 
         FinishInstance(instance, WorkflowStatuses.Withdrawn, userId, "withdraw", comment);
     }
@@ -416,7 +416,7 @@ public static class WorkflowEngine
         var instance = LoadRunning(instanceId);
         var graph = ParseSnapshot(instance);
         var node = graph.Find(targetNodeId);
-        if (node == null) throw new WorkflowException(400, "跳转目标节点不存在");
+        if (node == null) throw new WorkflowException(400, "The jump target node does not exist");
 
         CancelAllOpen(instance.Id);
         AddComment(instance.Id, 0, userId, null, "jump", comment);
@@ -513,16 +513,16 @@ public static class WorkflowEngine
     static void HandleVote(Int64 taskId, Int32 userId, String comment, Boolean reject, Boolean asTimeout)
     {
         var userName = asTimeout ? "系统" : User.FindByID(userId)?.Name ?? userId + "";
-        var task = asTimeout ? (WorkflowTask.FindById(taskId) ?? throw new WorkflowException(404, "任务不存在")) : LoadOpenTask(taskId, userId, !reject);
-        var instance = WorkflowInstance.FindById(task.InstanceId) ?? throw new WorkflowException(404, "流程实例不存在");
-        if (instance.Status != WorkflowStatuses.Running) throw new WorkflowException(409, "流程已结束");
+        var task = asTimeout ? (WorkflowTask.FindById(taskId) ?? throw new WorkflowException(404, "Task does not exist")) : LoadOpenTask(taskId, userId, !reject);
+        var instance = WorkflowInstance.FindById(task.InstanceId) ?? throw new WorkflowException(404, "Flow instance does not exist");
+        if (instance.Status != WorkflowStatuses.Running) throw new WorkflowException(409, "The flow has ended");
 
         using var tran = WorkflowTask.Meta.CreateTrans();
 
         // 乐观并发：事务内重读
         var fresh = WorkflowTask.FindById(task.Id);
         if (fresh.Status is not (WorkflowStatuses.Pending or WorkflowStatuses.Active))
-            throw new WorkflowException(409, "任务已被处理");
+            throw new WorkflowException(409, "The task has already been processed");
         if (!asTimeout) EnsureCandidate(fresh, userId);
         task = fresh;
 
@@ -530,7 +530,7 @@ public static class WorkflowEngine
         {
             var snap = ParseSnapshot(instance);
             if (snap?.Find(BaseNodeId(task.NodeId))?.Type == WorkflowGraph.HandleType)
-                throw new WorkflowException(400, "办理节点不能驳回");
+                throw new WorkflowException(400, "A handle node cannot reject");
             task.Status = WorkflowStatuses.Rejected;
             task.AssigneeId = asTimeout ? task.AssigneeId : userId;
             task.FinishTime = DateTime.Now;
@@ -704,12 +704,12 @@ public static class WorkflowEngine
     {
         if (nodeId.IsNullOrEmpty()) return;
         var node = graph.Find(nodeId);
-        if (node == null) throw new WorkflowException(500, $"图数据损坏：节点[{nodeId}]不存在");
+        if (node == null) throw new WorkflowException(500, $"Graph data corrupted: node [{nodeId}] does not exist");
 
         if (!visited.Add(nodeId))
         {
             // 到过 end 或再次到达同一节点视为数据损坏（V1 无环）
-            if (node.Type != WorkflowGraph.EndType) throw new WorkflowException(500, $"图数据损坏：存在环[{nodeId}]");
+            if (node.Type != WorkflowGraph.EndType) throw new WorkflowException(500, $"Graph data corrupted: cycle at [{nodeId}]");
             return;
         }
 
@@ -752,7 +752,7 @@ public static class WorkflowEngine
                 }
                 break;
             default:
-                throw new WorkflowException(500, $"图数据损坏：未知节点类型[{node.Type}]");
+                throw new WorkflowException(500, $"Graph data corrupted: unknown node type [{node.Type}]");
         }
     }
 
@@ -867,7 +867,7 @@ public static class WorkflowEngine
             var picked = _picks.Value != null && _picks.Value.TryGetValue(node.Id, out var list) ? list : null;
             var multiple = to?["multiple"]?.GetValue<Boolean>() ?? false;
             if (picked == null || picked.Count == 0 || (!multiple && picked.Count != 1))
-                throw new WorkflowException(400, $"节点[{node.Name}]需要提交人自选");
+                throw new WorkflowException(400, $"Node [{node.Name}] requires the submitter to choose");
             ids.AddRange(picked.Where(e => e > 0));
         }
         else
@@ -1088,7 +1088,7 @@ public static class WorkflowEngine
                 return c.Target;
         }
         if (!node.DefaultTarget.IsNullOrEmpty()) return node.DefaultTarget;
-        throw new WorkflowException(500, $"网关[{node.Id}]无 default 且无命中，运行期视为数据损坏");
+        throw new WorkflowException(500, $"Gateway [{node.Id}] has no default branch and no match; treated as corrupted data at runtime");
     }
 
     /// <summary>读取第一条主体的业务行（XOR/StartFilter 复读）</summary>
@@ -1118,7 +1118,7 @@ public static class WorkflowEngine
     /// <param name="comment">意见</param>
     static void FinishInstance(WorkflowInstance instance, String status, Int32 userId, String action, String comment)
     {
-        if (instance.Status != WorkflowStatuses.Running) throw new WorkflowException(409, "流程已结束");
+        if (instance.Status != WorkflowStatuses.Running) throw new WorkflowException(409, "The flow has ended");
 
         CancelAllOpen(instance.Id);
         instance.Status = status;
@@ -1181,8 +1181,8 @@ public static class WorkflowEngine
     /// <returns>实例</returns>
     static WorkflowInstance LoadRunning(Int64 instanceId)
     {
-        var instance = WorkflowInstance.FindById(instanceId) ?? throw new WorkflowException(404, "流程实例不存在");
-        if (instance.Status != WorkflowStatuses.Running) throw new WorkflowException(409, "流程已结束");
+        var instance = WorkflowInstance.FindById(instanceId) ?? throw new WorkflowException(404, "Flow instance does not exist");
+        if (instance.Status != WorkflowStatuses.Running) throw new WorkflowException(409, "The flow has ended");
         return instance;
     }
 
@@ -1193,10 +1193,10 @@ public static class WorkflowEngine
     /// <returns>任务</returns>
     static WorkflowTask LoadOpenTask(Int64 taskId, Int32 userId, Boolean needCandidate)
     {
-        var task = WorkflowTask.FindById(taskId) ?? throw new WorkflowException(404, "任务不存在");
+        var task = WorkflowTask.FindById(taskId) ?? throw new WorkflowException(404, "Task does not exist");
         if (task.Status is not (WorkflowStatuses.Pending or WorkflowStatuses.Active))
-            throw new WorkflowException(409, "任务已结束");
-        if (!task.Visible) throw new WorkflowException(409, "尚未轮到该任务");
+            throw new WorkflowException(409, "The task has ended");
+        if (!task.Visible) throw new WorkflowException(409, "It is not this task's turn yet");
         if (needCandidate) EnsureCandidate(task, userId);
         return task;
     }
@@ -1209,7 +1209,7 @@ public static class WorkflowEngine
         if (task.AssigneeId == userId) return;
         var cands = WorkflowHelper.ReadIntArray(JsonNode.Parse(task.CandidateJson) as JsonArray);
         if (cands.Contains(userId)) return;
-        throw new WorkflowException(403, "非候选人不能操作该任务");
+        throw new WorkflowException(403, "Only candidates can operate on this task");
     }
 
     /// <summary>解析接收人（候选 + 单用户约束）</summary>
@@ -1233,7 +1233,7 @@ public static class WorkflowEngine
     public static IEntityFactory ResolveFactory(String typePath)
     {
         var np = AutomationPaths.NormalizeTypePath(typePath);
-        if (np.IsNullOrEmpty()) throw new WorkflowException(400, "实体路径为空");
+        if (np.IsNullOrEmpty()) throw new WorkflowException(400, "Entity path is empty");
 
         foreach (var kv in EntityPageRegistry.GetAll())
         {
@@ -1246,7 +1246,7 @@ public static class WorkflowEngine
             e.IsClass && !e.IsAbstract && typeof(IEntity).IsAssignableFrom(e) && e.Name.EqualIgnoreCase(type));
         if (entityType != null) return EntityFactory.CreateFactory(entityType);
 
-        throw new WorkflowException(400, $"无法解析实体路径[{np}]，请确认该实体有管理页面");
+        throw new WorkflowException(400, $"Cannot resolve entity path [{np}]; make sure the entity has an admin page");
     }
 
     /// <summary>主键归一化为可存储文本（数值 InvariantCulture、字符串 trim）</summary>
@@ -1282,7 +1282,7 @@ public static class WorkflowEngine
     static WorkflowGraph ParseSnapshot(WorkflowInstance instance)
     {
         var graph = WorkflowGraph.Parse(instance.GraphSnapshot);
-        if (graph == null) throw new WorkflowException(500, "实例图快照损坏");
+        if (graph == null) throw new WorkflowException(500, "The instance graph snapshot is corrupted");
         return graph;
     }
 

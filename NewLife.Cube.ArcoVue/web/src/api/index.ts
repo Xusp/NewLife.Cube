@@ -1,4 +1,4 @@
-import { createCubeApi } from '@newlifex/api-core';
+import { createCubeApi } from '@newlifex/cube';
 import { clearLocalProfile } from '@/core/utils/userProfile';
 import { isEmbedMode } from '@/core/utils/embedMode';
 import { clearTenantSession, resolveTenantHeader } from '@/stores/tenantHeader';

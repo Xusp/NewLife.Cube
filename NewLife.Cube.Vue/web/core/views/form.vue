@@ -2,12 +2,13 @@
 /**
  * 表单页（默认模板）
  *
- * 自动模式下从后端 GetPage 拉取 addForm / editForm 字段元数据，归一为 `FieldMeta[]`
+ * 自动模式下从后端 meta 拉取 form / add 字段元数据，归一为 `FieldMeta[]`
  * 交给 `FormContent` 统一渲染（控件解析由 fieldControl.ts 的 resolveControl 完成，
  * 本文件不再维护本地 TYPE_TO_FORM_TYPE 映射，彻底消除与列表页的不一致）。
  */
 import { inject, provide, defineAsyncComponent, ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { ElMessage } from 'element-plus';
 import type { Component } from 'vue';
 import request from '@newlifex/cube-vue/core/utils/request';
@@ -24,23 +25,9 @@ import DefaultFormContent from '@newlifex/cube-vue/core/views/components/FormCon
 import DefaultFormActions from '@newlifex/cube-vue/core/views/components/FormActions.vue';
 import { routeToApiPrefix } from '../utils/url';
 import { serializeSubmitModel } from '../utils/fieldControl';
+import { backendFieldsToFormFields } from '../utils/fieldMeta';
 import type { FieldMeta } from '../types/field';
-
-/** 后端下发的原始字段（DataField 归一结构） */
-interface BackendField {
-  name: string;
-  displayName: string;
-  description?: string;
-  typeName: string;
-  itemType?: string;
-  length?: number;
-  nullable?: boolean;
-  primaryKey?: boolean;
-  readOnly?: boolean;
-  lovCode?: string;
-  multiple?: boolean;
-  dataSource?: Record<string, string>;
-}
+import type { BackendField } from '../engine/types';
 
 interface Props {
   title?: string;
@@ -63,6 +50,7 @@ const emit = defineEmits<{
 
 const route = useRoute();
 const router = useRouter();
+const { t } = useI18n();
 
 const registry = inject(
   PageSectionRegistryKey,
@@ -85,48 +73,38 @@ const apiPrefix = computed(() => routeToApiPrefix(route.path));
 const isEdit = computed(() => !!(route.query.id || route.query.id?.toString() === '0'));
 
 // 未传入 fields 时启动自动模式
-const auto = computed(() => !!!props.fields);
+const auto = computed(() => !props.fields);
 
-const pageMeta = ref<{ addForm: BackendField[]; editForm: BackendField[] } | null>(null);
 const internalModelValue = ref<Record<string, unknown>>({});
 const internalFields = ref<FieldMeta[]>([]);
 const isSubmitting = ref(false);
-
-/** 后端字段 → 统一 FieldMeta（透传 lovCode / multiple / description 等元数据） */
-function backendFieldsToFormFields(fields: BackendField[]): FieldMeta[] {
-  return fields
-    .filter((f) => !f.primaryKey && !f.readOnly)
-    .map((f) => ({
-      name: f.name,
-      displayName: f.displayName,
-      description: f.description,
-      typeName: f.typeName,
-      itemType: f.itemType,
-      length: f.length,
-      nullable: f.nullable,
-      primaryKey: f.primaryKey,
-      readOnly: f.readOnly,
-      lovCode: f.lovCode,
-      multiple: f.multiple,
-      dataSource: f.dataSource,
-    }));
-}
+/** FormContent 暴露的校验入口（注入组件同样支持） */
+const formRef = ref<{ validate?: () => boolean } | null>(null);
 
 async function fetchPageMeta() {
   if (!auto.value) return;
   try {
-    console.log('[DefaultForm] GetPage:', apiPrefix.value + '/GetPage');
-    const res = await request({ url: apiPrefix.value + '/GetPage', method: 'get' });
-    const meta = res as any;
-    pageMeta.value = meta;
-    const sourceFields = isEdit.value ? meta.editForm : meta.addForm;
-    if (sourceFields && sourceFields.length > 0) {
-      internalFields.value = backendFieldsToFormFields(sourceFields);
-    } else {
-      internalFields.value = backendFieldsToFormFields(meta.addForm ?? meta.editForm ?? []);
-    }
+    console.log('[DefaultForm] meta:', apiPrefix.value + '/meta');
+    const res = await request({ url: apiPrefix.value + '/meta', method: 'get' });
+    const meta = (res?.data ?? res) as {
+      form?: BackendField[];
+      add?: BackendField[];
+      /** 旧服务端字段 */
+      addForm?: BackendField[];
+      /** 旧服务端字段 */
+      editForm?: BackendField[];
+    };
+    // 新服务端：form 为编辑表单，add 省略时回退 form；旧服务端字段保留兼容
+    const form = Array.isArray(meta.form) ? meta.form : [];
+    const add = Array.isArray(meta.add) ? meta.add : form;
+    const legacyEdit = Array.isArray(meta.editForm) ? meta.editForm : [];
+    const legacyAdd = Array.isArray(meta.addForm) ? meta.addForm : [];
+    const editFields = form.length ? form : legacyEdit;
+    const addFields = add.length ? add : legacyAdd.length ? legacyAdd : editFields;
+    const sourceFields = isEdit.value ? editFields : addFields;
+    internalFields.value = backendFieldsToFormFields(sourceFields.length ? sourceFields : editFields);
   } catch (err) {
-    console.error('[DefaultForm] GetPage failed:', err);
+    console.error('[DefaultForm] meta failed:', err);
   }
 }
 
@@ -148,22 +126,25 @@ async function fetchDetail() {
 }
 
 async function handleSubmit() {
+  if (formRef.value?.validate && !formRef.value.validate()) return;
+
   if (auto.value) {
     if (isSubmitting.value) return;
     isSubmitting.value = true;
     try {
       const model = serializeSubmitModel(internalModelValue.value, renderFields.value);
       if (isEdit.value) {
-        await request({ url: apiPrefix.value, method: 'put', data: model });
-        ElMessage.success('更新成功');
+        const editId = route.query.id ?? model.id ?? model.Id;
+        await request({ url: `${apiPrefix.value}/${editId}`, method: 'put', data: model });
+        ElMessage.success(t('common.updateSuccess'));
       } else {
         await request({ url: apiPrefix.value, method: 'post', data: model });
-        ElMessage.success('新增成功');
+        ElMessage.success(t('common.addSuccess'));
       }
       router.back();
     } catch (err: any) {
       // 全局响应拦截器已统一弹出错误提示，业务层无需重复 toast
-      console.error('[DefaultForm] 保存失败:', err);
+      console.error('[DefaultForm] save failed:', err);
     } finally {
       isSubmitting.value = false;
     }
@@ -221,6 +202,7 @@ onMounted(async () => {
       <slot name="form">
         <component
           :is="FormContentComp"
+          ref="formRef"
           :fields="renderFields"
           :model-value="renderModelValue"
           :api-prefix="apiPrefix"

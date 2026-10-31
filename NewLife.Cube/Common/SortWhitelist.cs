@@ -28,9 +28,9 @@ public static class SortWhitelist
     /// <returns>形如 Name asc, CreateTime desc</returns>
     public static String Compile(String raw, IEnumerable<String> factoryFields, Func<String, Boolean> allowed)
     {
-        if (raw.IsNullOrEmpty()) throw new ApiException(400, "排序条件无效");
+        if (raw.IsNullOrEmpty()) throw new ApiException(400, "Invalid sort condition");
         var parts = raw.Split(',');
-        if (parts.Length == 0 || parts.Length > 3) throw new ApiException(400, "排序条件无效");
+        if (parts.Length == 0 || parts.Length > 3) throw new ApiException(400, "Invalid sort condition");
 
         var canon = new Dictionary<String, String>(StringComparer.OrdinalIgnoreCase);
         if (factoryFields != null)
@@ -44,12 +44,12 @@ public static class SortWhitelist
         var clauses = new List<String>(parts.Length);
         foreach (var part in parts)
         {
-            if (part.IsNullOrEmpty()) throw new ApiException(400, "排序条件无效");
+            if (part.IsNullOrEmpty()) throw new ApiException(400, "Invalid sort condition");
             var desc = part[0] == '-';
             var token = desc ? part.Substring(1) : part;
-            if (token.Length == 0 || !FieldName.IsMatch(token)) throw new ApiException(400, "排序条件无效");
-            if (!canon.TryGetValue(token, out var name)) throw new ApiException(400, "排序字段不存在");
-            if (allowed != null && !allowed(name)) throw new ApiException(400, "排序字段不存在");
+            if (token.Length == 0 || !FieldName.IsMatch(token)) throw new ApiException(400, "Invalid sort condition");
+            if (!canon.TryGetValue(token, out var name)) throw new ApiException(400, "Sort field does not exist");
+            if (allowed != null && !allowed(name)) throw new ApiException(400, "Sort field does not exist");
             clauses.Add(name + (desc ? " desc" : " asc"));
         }
         return String.Join(", ", clauses);

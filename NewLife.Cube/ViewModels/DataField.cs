@@ -1,0 +1,726 @@
+﻿using System.Collections;
+using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
+using System.Reflection;
+using System.Runtime.Serialization;
+using System.Text.Json.Serialization;
+using System.Xml.Serialization;
+using NewLife;
+using NewLife.Collections;
+using XCode;
+using XCode.Configuration;
+
+namespace NewLife.Cube.ViewModels;
+
+/// <summary>获取数据源委托</summary>
+/// <param name="entity"></param>
+/// <returns></returns>
+public delegate IDictionary DataSourceDelegate(Object entity);
+
+/// <summary>数据可见委托</summary>
+/// <param name="entity"></param>
+/// <returns></returns>
+public delegate Boolean DataVisibleDelegate(Object entity);
+
+/// <summary>数据字段</summary>
+public class DataField : IDictionarySource
+{
+    #region 属性
+    /// <summary>名称</summary>
+    public String Name { get; set; }
+
+    /// <summary>显示名</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public String DisplayName { get; set; }
+
+    /// <summary>描述</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public String Description { get; set; }
+
+    /// <summary>描述源文。字段只有描述特性时保存整段描述，供多语言翻译后再拆分显示名与描述</summary>
+    [XmlIgnore, IgnoreDataMember, JsonIgnore]
+    public String SourceDescription { get; set; }
+
+    /// <summary>是否为字段默认显示名。用于区分控制器自定义的列标题，避免本地化后误判</summary>
+    [XmlIgnore, IgnoreDataMember, JsonIgnore]
+    public Boolean IsDefaultDisplayName { get; set; } = true;
+
+    /// <summary>类别</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public String Category { get; set; }
+
+    /// <summary>属性类型</summary>
+    [XmlIgnore, IgnoreDataMember, JsonIgnore]
+    public Type Type
+    {
+        get => _type;
+        set
+        {
+            _type = value;
+            // Type 不序列化；始终同步 TypeName 供 SPA GetFields/GetPage 消费（布尔→开关、枚举→下拉）
+            if (value != null)
+            {
+                var t = System.Nullable.GetUnderlyingType(value) ?? value;
+                TypeName = t.Name;
+            }
+        }
+    }
+    private Type _type;
+
+    /// <summary>属性类型名（可序列化；与 Type 同步，避免 get-only 在部分序列化器下丢失）</summary>
+    public String TypeName { get; set; }
+
+    /// <summary>元素类型。image,file-zip,html,singleSelect,multipleSelect</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public String ItemType { get; set; }
+
+    /// <summary>长度</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public Int32 Length { get; set; }
+
+    /// <summary>精度</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public Int32 Precision { get; set; }
+
+    /// <summary>位数</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public Int32 Scale { get; set; }
+
+    /// <summary>允许空</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public Boolean Nullable { get; set; }
+
+    /// <summary>主键</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public Boolean PrimaryKey { get; set; }
+
+    /// <summary>可按索引排序。主键首列，或任一索引的最左列。单独作为 ORDER BY 时能走索引，避免全表扫描</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public Boolean Indexed { get; set; }
+
+    /// <summary>是否物理表字段。控制器 AddListField 等没有对应列的字段为 false，不能参与排序</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public Boolean Column { get; set; }
+
+    /// <summary>只读</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public Boolean ReadOnly { get; set; }
+
+    /// <summary>是否可见</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public Boolean Visible { get; set; }
+
+    /// <summary>是否必填</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public Boolean Required { get; set; }
+
+    /// <summary>权限相关。用户自由发挥</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public String Authority { get; set; }
+
+    /// <summary>敏感字段。实体 IFieldScope.GetSensitiveFields 命中且当前用户未获 ViewSensitive 权限时为 true，供前端藏列</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public Boolean Sensitive { get; set; }
+
+    /// <summary>扩展字段。用户自由发挥</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public String Extended1 { get; set; }
+
+    /// <summary>扩展字段。用户自由发挥</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public String Extended2 { get; set; }
+
+    /// <summary>扩展字段。用户自由发挥</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public String Extended3 { get; set; }
+
+    /// <summary>原始字段</summary>
+    [XmlIgnore, IgnoreDataMember, JsonIgnore]
+    public FieldItem Field { get; set; }
+
+    /// <summary>映射字段</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public String MapField { get; set; }
+
+    /// <summary>取值字段。列表单元格优先取该字段值，为空时回退到本字段。如名称列优先显示昵称：Name.ValueField=DisplayName</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public String ValueField { get; set; }
+
+    /// <summary>值集编码（枚举 / singleSelect / multipleSelect 由后端静态构造下发，前端绝不硬编码）</summary>
+    public String LovCode { get; set; }
+
+    /// <summary>映射提供者</summary>
+    [XmlIgnore, IgnoreDataMember, JsonIgnore]
+    public MapProvider MapProvider { get; set; }
+
+    /// <summary>多选数据源</summary>
+    [XmlIgnore, IgnoreDataMember, JsonIgnore]
+    public DataSourceDelegate DataSource { get; set; }
+
+    /// <summary>数据源字典（API/SPA 序列化输出，键值均为字符串）。与 DataSource 委托互补</summary>
+    public IDictionary DataSourceMap { get; set; }
+
+    /// <summary>是否显示</summary>
+    [XmlIgnore, IgnoreDataMember, JsonIgnore]
+    public DataVisibleDelegate DataVisible { get; set; }
+
+    /// <summary>扩展属性</summary>
+    [XmlIgnore, IgnoreDataMember, JsonIgnore]
+    public IDictionary<String, String> Properties { get; set; } = new NullableDictionary<String, String>(StringComparer.OrdinalIgnoreCase);
+    #endregion
+
+    #region 构造
+    /// <summary>实例化数据字段</summary>
+    public DataField() { }
+
+    /// <summary>实例化数据字段</summary>
+    /// <param name="field"></param>
+    public DataField(FieldItem field) => Fill(field);
+
+    /// <summary>已重载</summary>
+    /// <returns></returns>
+    public override String ToString() => $"{Name} {DisplayName} {Type.Name}";
+    #endregion
+
+    #region 方法
+    ///// <summary>实例化</summary>
+    //public DataField() { }
+
+    /// <summary>转字典，用于FastJson序列化。仅输出有意义字段，忽略null/0/false等默认值，显著减小GetPage等元数据接口体积</summary>
+    /// <returns></returns>
+    public virtual IDictionary<String, Object> ToDictionary()
+    {
+        var dic = new Dictionary<String, Object>
+        {
+            ["name"] = Name,
+        };
+
+        if (!DisplayName.IsNullOrEmpty()) dic["displayName"] = DisplayName;
+        if (!Description.IsNullOrEmpty()) dic["description"] = Description;
+        if (!Category.IsNullOrEmpty()) dic["category"] = Category;
+        if (!TypeName.IsNullOrEmpty()) dic["typeName"] = TypeName;
+        if (!ItemType.IsNullOrEmpty()) dic["itemType"] = ItemType;
+        if (Length > 0) dic["length"] = Length;
+        if (Precision > 0) dic["precision"] = Precision;
+        if (Scale > 0) dic["scale"] = Scale;
+        if (Nullable) dic["nullable"] = true;
+        if (PrimaryKey) dic["primaryKey"] = true;
+        if (Indexed) dic["indexed"] = true;
+        if (Column) dic["column"] = true;
+        if (ReadOnly) dic["readOnly"] = true;
+        if (Visible) dic["visible"] = true;
+        // 必填显式下发 true/false（OSC-260925 审计修正）：前端 isFieldRequired 以「显式 required 优先，
+        // 未下发时按 nullable 兜底」，只发 true 会让被判非必填的数值/布尔字段在前端又被兜底规则改回必填
+        dic["required"] = Required;
+        if (!Authority.IsNullOrEmpty()) dic["authority"] = Authority;
+        if (!Extended1.IsNullOrEmpty()) dic["extended1"] = Extended1;
+        if (!Extended2.IsNullOrEmpty()) dic["extended2"] = Extended2;
+        if (!Extended3.IsNullOrEmpty()) dic["extended3"] = Extended3;
+        if (!MapField.IsNullOrEmpty()) dic["mapField"] = MapField;
+        if (!ValueField.IsNullOrEmpty()) dic["valueField"] = ValueField;
+        if (!LovCode.IsNullOrEmpty()) dic["lovCode"] = LovCode;
+
+        // 扩展属性透传。核心不解释 props，由前端渲染器按约定消费
+        if (Properties != null && Properties.Count > 0) dic["props"] = Properties;
+
+        // 数据源。优先级：已物化 DataSourceMap（非布尔，避免重复跑委托）→ DataSource 委托（控制器显式配置，如角色组）
+        // → 枚举反射 → DataSourceMap 回退。（PrepareForApi / MapCandidateFiller 物化的 Map 外键候选）。
+        // 前端按 dataSource 渲染本地下拉（对齐 MVC _Form_Item/_Form_Int）；漏掉 DataSourceMap 会让 Map 外键退化为数字输入框。
+        // 布尔不使用 map：各皮肤按 typeName 渲染开关，字典会让开关变下拉。
+        var underlyingType = Type == null ? null : System.Nullable.GetUnderlyingType(Type) ?? Type;
+        var isBooleanType = underlyingType == typeof(Boolean) || "Boolean".EqualIgnoreCase(TypeName);
+        IDictionary ds = null;
+        var fromDelegate = false;
+        if (!isBooleanType && DataSourceMap != null && DataSourceMap.Count > 0)
+        {
+            ds = DataSourceMap;
+        }
+        else
+        {
+            if (DataSource != null)
+            {
+                try
+                {
+                    ds = DataSource(null);
+                    fromDelegate = true;
+                }
+                catch { /* 委托依赖实体上下文时可能失败，忽略并降级 */ }
+            }
+
+            if ((ds == null || ds.Count == 0) && Type != null && Type.IsEnum)
+            {
+                // 枚举选项：反射枚举成员，标签取 DisplayName/Description/成员名（对齐 MVC _Form_Int）
+                var eds = new Dictionary<String, String>();
+                foreach (var item in Type.GetFields(BindingFlags.Public | BindingFlags.Static))
+                {
+                    var value = Convert.ToInt64(item.GetValue(null));
+                    var label = item.Name;
+                    var dna = item.GetCustomAttribute<DisplayNameAttribute>(false);
+                    if (dna != null && !String.IsNullOrEmpty(dna.DisplayName)) label = dna.DisplayName;
+                    var att = item.GetCustomAttribute<DescriptionAttribute>(false);
+                    if (att != null && !String.IsNullOrEmpty(att.Description)) label = att.Description;
+                    eds[value + ""] = label;
+                }
+                if (eds.Count > 0) ds = eds;
+            }
+
+            // Map 外键：委托与枚举都未产出时回退已物化字典，避免外键字段丢失候选。
+            // 布尔字段不回退：各皮肤按 typeName 渲染开关，dataSource 优先的皮肤（field-mapping / Cube.Vue）
+            // 会因字典存在而误判为下拉，导致开关变选择框
+            if ((ds == null || ds.Count == 0) && !isBooleanType && DataSourceMap != null && DataSourceMap.Count > 0) ds = DataSourceMap;
+        }
+
+        if (ds != null && ds.Count > 0)
+        {
+            var sds = new Dictionary<String, String>();
+            foreach (DictionaryEntry item in ds)
+            {
+                if (item.Key != null) sds[item.Key + ""] = item.Value + "";
+            }
+            dic["dataSource"] = sds;
+
+            // 多选：显式 ItemType=multipleSelect，或委托来源且字段名以 s 结尾（MVC _Form_Item 约定）。
+            // 物化字典来源不按名称推断，避免枚举/布尔字段被误标多选
+            if (String.Equals(ItemType, "multipleSelect", StringComparison.OrdinalIgnoreCase) || (fromDelegate && Name.EndsWith("s")))
+                dic["multiple"] = true;
+        }
+
+        // 子类扩展字段
+        switch (this)
+        {
+            case ListField lf:
+                if (!lf.Text.IsNullOrEmpty()) dic["text"] = lf.Text;
+                if (!lf.Title.IsNullOrEmpty()) dic["title"] = lf.Title;
+                if (!lf.Url.IsNullOrEmpty()) dic["url"] = lf.Url;
+                if (!lf.Target.IsNullOrEmpty()) dic["target"] = lf.Target;
+                if (!lf.Header.IsNullOrEmpty()) dic["header"] = lf.Header;
+                if (!lf.HeaderTitle.IsNullOrEmpty()) dic["headerTitle"] = lf.HeaderTitle;
+                if (lf.TextAlign != TextAligns.Default) dic["textAlign"] = lf.TextAlign;
+                if (!lf.Class.IsNullOrEmpty()) dic["class"] = lf.Class;
+                if (lf.MaxWidth > 0) dic["maxWidth"] = lf.MaxWidth;
+                if (!lf.DataAction.IsNullOrEmpty()) dic["dataAction"] = lf.DataAction;
+                if (!lf.View.IsNullOrEmpty()) dic["view"] = lf.View;
+                break;
+            case SearchField sf:
+                if (sf.Multiple) dic["multiple"] = true;
+                if (!sf.View.IsNullOrEmpty()) dic["view"] = sf.View;
+                break;
+            case FormField ff:
+                if (!ff.GroupView.IsNullOrEmpty()) dic["groupView"] = ff.GroupView;
+                if (!ff.ItemView.IsNullOrEmpty()) dic["itemView"] = ff.ItemView;
+                // 统一渲染器名：单字段控件优先 ItemView，多字段合并控件用 GroupView
+                if (!ff.ItemView.IsNullOrEmpty()) dic["view"] = ff.ItemView;
+                else if (!ff.GroupView.IsNullOrEmpty()) dic["view"] = ff.GroupView;
+                if (ff.Expand != null)
+                {
+                    var exp = ff.Expand;
+                    var edic = new Dictionary<String, Object>
+                    {
+                        ["name"] = exp.Name,
+                    };
+                    if (exp.Retain) edic["retain"] = true;
+                    if (!exp.Prefix.IsNullOrEmpty()) edic["prefix"] = exp.Prefix;
+                    if (!exp.Category.IsNullOrEmpty()) edic["category"] = exp.Category;
+                    dic["expand"] = edic;
+                }
+                break;
+        }
+
+        return dic;
+    }
+
+    /// <summary>从FieldItem填充</summary>
+    /// <param name="field"></param>
+    public virtual void Fill(FieldItem field)
+    {
+        Field = field;
+
+        var dc = field.Field;
+        //var pi = field.GetValue("_Property", false) as PropertyInfo;
+        var pi = field.Property;
+
+        Name = field.Name;
+        DisplayName = field.DisplayName;
+        Description = field.Description;
+        IsDefaultDisplayName = true;
+
+        // 生成器把整段描述同时写入显示名与描述，保留整段源文，翻译后再拆分
+        if (!DisplayName.IsNullOrEmpty() && !Description.IsNullOrEmpty() &&
+            (Description.StartsWith(DisplayName + "。", StringComparison.Ordinal) ||
+             Description.StartsWith(DisplayName + ". ", StringComparison.Ordinal)))
+        {
+            SourceDescription = Description;
+        }
+
+        Category = pi?.GetCustomAttribute<CategoryAttribute>()?.Category;
+
+        Type = field.Type;
+        //DataType = field.Type.Name;
+
+        Length = field.Length;
+        Nullable = field.IsNullable;
+        PrimaryKey = field.PrimaryKey;
+        Indexed = CanOrderByIndex(field);
+        Column = !field.ColumnName.IsNullOrEmpty();
+        ReadOnly = field.ReadOnly;
+
+        if (field.Map != null)
+        {
+            MapField = field.Map.Name;
+            MapProvider = field.Map.Provider;
+        }
+
+        if (dc != null)
+        {
+            ItemType = dc.ItemType;
+            Precision = dc.Precision;
+            Scale = dc.Scale;
+
+            if (dc.Properties != null)
+            {
+                foreach (var item in dc.Properties)
+                {
+                    Properties[item.Key] = item.Value;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// 单独作为 ORDER BY 时能否走索引。
+    /// 主键只认首列；复合索引只认最左列。其余列即使出现在索引里，单独排序仍会全表扫描。
+    /// </summary>
+    static Boolean CanOrderByIndex(FieldItem field)
+    {
+        if (field == null) return false;
+        var table = field.Table;
+        if (table == null) return field.PrimaryKey;
+
+        var pks = table.PrimaryKeys;
+        if (pks != null && pks.Length > 0)
+        {
+            if (SameField(pks[0], field)) return true;
+        }
+        else if (field.PrimaryKey)
+        {
+            return true;
+        }
+
+        var indexes = table.DataTable?.Indexes;
+        if (indexes == null) return false;
+        foreach (var idx in indexes)
+        {
+            var cols = idx?.Columns;
+            if (cols == null || cols.Length == 0) continue;
+            if (ColumnEquals(cols[0], field)) return true;
+        }
+        return false;
+    }
+
+    static Boolean SameField(FieldItem lead, FieldItem field) =>
+        lead != null && lead.Name.EqualIgnoreCase(field.Name);
+
+    static Boolean ColumnEquals(String column, FieldItem field)
+    {
+        if (column.IsNullOrEmpty()) return false;
+        if (column.EqualIgnoreCase(field.Name)) return true;
+        return !field.ColumnName.IsNullOrEmpty() && column.EqualIgnoreCase(field.ColumnName);
+    }
+
+    /// <summary>从PropertyInfo填充</summary>
+    /// <param name="property"></param>
+    public virtual void Fill(PropertyInfo property)
+    {
+        Name = property.Name;
+        Type = property.PropertyType;
+
+        Category = property?.GetCustomAttribute<CategoryAttribute>()?.Category;
+
+        var df = property.GetCustomAttribute<DataObjectFieldAttribute>();
+        if (df != null)
+        {
+            Length = df.Length;
+            Nullable = df.IsNullable;
+            PrimaryKey = df.PrimaryKey;
+        }
+
+        var dis = property.GetDisplayName();
+        var des = property.GetDescription();
+        IsDefaultDisplayName = true;
+        if (dis.IsNullOrEmpty() && !des.IsNullOrEmpty())
+        {
+            // 只有描述特性时，整段描述先作为显示名，并保留源文供多语言翻译后拆分
+            dis = des;
+            des = null;
+            SourceDescription = dis;
+        }
+        if (!dis.IsNullOrEmpty() && !des.IsNullOrEmpty() &&
+            (des.StartsWith(dis + ". ", StringComparison.Ordinal) || des.StartsWith(dis + "。", StringComparison.Ordinal)))
+        {
+            // 生成器把整段描述同时写入显示名与描述，此时以整段描述为源文翻译后再拆分，词表只需登记一条
+            SourceDescription = des;
+        }
+        if (!dis.IsNullOrEmpty() && des.IsNullOrEmpty())
+        {
+            // 中文句号与英文句点均可作为显示名与描述的分隔符
+            var (name, desc) = SplitFirstSentence(dis);
+            if (desc != null)
+            {
+                dis = name;
+                des = desc;
+            }
+        }
+        DisplayName = dis ?? property.Name;
+        Description = des;
+
+        var ra = property.GetCustomAttribute<ReadOnlyAttribute>();
+        if (ra != null) ReadOnly = ra.IsReadOnly;
+    }
+
+    /// <summary>按当前语言本地化显示名、描述与分类</summary>
+    /// <remarks>
+    /// 字段元数据来自静态缓存，缓存中保存源文；每次请求克隆后调用本方法即可切换语言。
+    /// 有整段描述时先翻译再按首句拆分，避免先拆分导致词表键不匹配。
+    /// </remarks>
+    public virtual void Localize()
+    {
+        // 本地化前记录是否为默认列标题，供 ListField.GetLinkName 判断
+        var isDefault = Field == null || DisplayName == Field.DisplayName;
+        IsDefaultDisplayName = isDefault;
+
+        if (!SourceDescription.IsNullOrEmpty() && isDefault)
+        {
+            var translated = L.T(SourceDescription);
+            if (!ReferenceEquals(translated, SourceDescription))
+            {
+                var (name, desc) = SplitFirstSentence(translated);
+                DisplayName = name;
+                Description = desc;
+            }
+            else
+            {
+                // 整段描述没有译文时，按源文拆分后分别翻译，允许只补显示名或说明
+                var (name, desc) = SplitFirstSentence(SourceDescription);
+                DisplayName = L.T(name);
+                Description = desc == null ? null : L.T(desc);
+            }
+        }
+        else if (Description.IsNullOrEmpty() && !DisplayName.IsNullOrEmpty())
+        {
+            var (name, desc) = SplitFirstSentence(L.T(DisplayName));
+            DisplayName = name;
+            Description = desc;
+        }
+        else
+        {
+            if (!DisplayName.IsNullOrEmpty()) DisplayName = L.T(DisplayName);
+            if (!Description.IsNullOrEmpty()) Description = L.T(Description);
+        }
+
+        if (!Category.IsNullOrEmpty()) Category = L.T(Category);
+    }
+
+    /// <summary>克隆并按当前语言本地化字段集合</summary>
+    /// <param name="fields">源字段集合，来自静态缓存，保留源文</param>
+    /// <returns>可直接输出的字段副本</returns>
+    public static IList<DataField> Localize(IList<DataField> fields)
+    {
+        if (fields == null) return [];
+
+        var list = new List<DataField>(fields.Count);
+        foreach (var item in fields)
+        {
+            var df = item.Clone();
+            df.Localize();
+            list.Add(df);
+        }
+
+        return list;
+    }
+
+    /// <summary>按句末标点拆分显示名和描述</summary>
+    /// <param name="text">完整描述</param>
+    /// <returns>显示名与剩余描述；没有第二句时描述为 null</returns>
+    public static (String Display, String? Description) SplitFirstSentence(String text)
+    {
+        if (text.IsNullOrEmpty()) return (text, null);
+
+        var index = FindSentenceEnd(text);
+        if (index > 0)
+        {
+            var display = text[..index];
+            var description = text[(index + 1)..].Trim();
+            return (display, description.IsNullOrEmpty() ? null : description);
+        }
+
+        // 泰语等无句末标点的长描述，取首个空格前的短语作为显示名；短标签整体返回
+        if (text.Length > 40)
+        {
+            var space = text.IndexOf(' ');
+            if (space > 0) return (text[..space], text[(space + 1)..].Trim());
+        }
+
+        return (text, null);
+    }
+
+    private static Int32 FindSentenceEnd(String text)
+    {
+        for (var i = 0; i < text.Length; i++)
+        {
+            var ch = text[i];
+            if (ch is '。' or '！' or '？' or '।') return i;
+
+            // 英文句点仅在后面是空白或结尾时拆分，避免小数和 URL
+            if (ch is '.' or '!' or '?')
+            {
+                if (i + 1 >= text.Length || Char.IsWhiteSpace(text[i + 1])) return i;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>克隆</summary>
+    /// <returns></returns>
+    public virtual DataField Clone()
+    {
+        //var df = GetType().CreateInstance() as DataField;
+
+        //df.Name = Name;
+        //df.DisplayName = DisplayName;
+        //df.Description = Description;
+        //df.Category = Category;
+
+        //df.Type = Type;
+        //df.ItemType = ItemType;
+        //df.Length = Length;
+        //df.Precision = Precision;
+        //df.Scale = Scale;
+        //df.Nullable = Nullable;
+        //df.PrimaryKey = PrimaryKey;
+        //df.Readonly = Readonly;
+
+        //df.Field = Field;
+        //df.MapField = MapField;
+        //df.MapProvider = MapProvider;
+        //df.DataSource = DataSource;
+        ////df.Properties = Properties;
+
+        //foreach (var item in Properties)
+        //{
+        //    df.Properties[item.Key] = item.Value;
+        //}
+
+        //df._services = _services;
+
+        //return df;
+
+        return MemberwiseClone() as DataField;
+    }
+
+    /// <summary>是否大文本字段</summary>
+    /// <returns></returns>
+    public virtual Boolean IsBigText() => Type == typeof(String) && (Length < 0 || Length >= 300 || Length >= 200 && Name.EqualIgnoreCase("Remark", "Description", "Comment"));
+
+    /// <summary>是否附件列</summary>
+    /// <returns></returns>
+    public Boolean IsAttachment() => ItemType.EqualIgnoreCase("file", "image") || ItemType.StartsWithIgnoreCase("file-", "image-");
+
+    /// <summary>是否租户隔离字段（TenantId / TenantName 及 Map 查找列）。
+    /// SetRelation 会把 TenantId 换成 TenantName；TenantName 有 Map.Provider 时 FieldItem.ReadOnly 仍为 false，
+    /// TenantId=0（全局角色）时查找值为空，不能当必填失败。</summary>
+    public Boolean IsTenantScopeField()
+    {
+        if (Name.EqualIgnoreCase("TenantId", "TenantName", "Tenant")) return true;
+        if (!MapField.IsNullOrEmpty() && MapField.EqualIgnoreCase("TenantId")) return true;
+        var dn = DisplayName?.Trim();
+        return dn == "租户" || dn == "租户编号" || dn == "租户名称";
+    }
+
+    /// <summary>格式化数据用于显示</summary>
+    /// <param name="value"></param>
+    /// <returns></returns>
+    public virtual String FormatValue(Object value) => ViewHelper.FormatValue(!ItemType.IsNullOrEmpty() ? ItemType : Field?.Field?.DataScale, value, Description);
+
+    /// <summary>为 API/SPA 物化数据源字典（布尔/枚举/DataSource 委托），避免前端反复请求</summary>
+    public virtual void PrepareForApi()
+    {
+        if (DataSourceMap != null && DataSourceMap.Count > 0) return;
+
+        var map = new Dictionary<String, String>(StringComparer.OrdinalIgnoreCase);
+
+        if (DataSource != null)
+        {
+            try
+            {
+                var dic = DataSource(null);
+                if (dic != null)
+                {
+                    foreach (DictionaryEntry de in dic)
+                    {
+                        if (de.Key == null) continue;
+                        map[de.Key + ""] = de.Value + "";
+                    }
+                }
+            }
+            catch { /* 忽略委托异常，回落类型推断 */ }
+        }
+
+        if (map.Count == 0 && Type != null)
+        {
+            var t = System.Nullable.GetUnderlyingType(Type) ?? Type;
+            if (t == typeof(Boolean))
+            {
+                map["true"] = "是";
+                map["false"] = "否";
+                map["1"] = "是";
+                map["0"] = "否";
+            }
+            else if (t.IsEnum)
+            {
+                foreach (var v in Enum.GetValues(t))
+                {
+                    var name = Enum.GetName(t, v);
+                    if (name.IsNullOrEmpty()) continue;
+                    var fi = t.GetField(name);
+                    var dn = fi?.GetCustomAttribute<DisplayNameAttribute>()?.DisplayName
+                        ?? fi?.GetCustomAttribute<DescriptionAttribute>()?.Description
+                        ?? name;
+                    var num = Convert.ToInt64(v).ToString();
+                    map[num] = dn;
+                    map[name] = dn;
+                }
+                if (LovCode.IsNullOrEmpty() && t.FullName != null)
+                    LovCode = "Enum." + t.FullName;
+            }
+        }
+
+        if (map.Count > 0) DataSourceMap = map;
+    }
+    #endregion
+
+    #region 服务
+    private readonly List<Object> _services = [];
+    /// <summary>扩展服务</summary>
+    [XmlIgnore, IgnoreDataMember]
+    public IList<Object> Services => _services;
+
+    /// <summary>添加服务</summary>
+    /// <typeparam name="TService"></typeparam>
+    /// <param name="service"></param>
+    public virtual void AddService<TService>(TService service) => _services.Add(service);
+
+    /// <summary>获取服务</summary>
+    /// <typeparam name="TService"></typeparam>
+    /// <returns></returns>
+    public virtual TService GetService<TService>() => (TService)_services.FirstOrDefault(e => e is TService);
+    #endregion
+
+    #region 类型转换
+    /// <summary>类型转换</summary>
+    /// <param name="obj"></param>
+    /// <returns></returns>
+    [return: NotNullIfNotNull(nameof(obj))]
+    public static implicit operator DataField(FieldItem obj) => obj == null ? null : new DataField(obj);
+    #endregion
+}

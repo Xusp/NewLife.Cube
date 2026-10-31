@@ -132,7 +132,6 @@ public class LovControllerGuardTests : IDisposable, IClassFixture<LovControllerG
 
     private readonly IManageProvider? _oldProvider;
     private readonly Boolean _oldEnableTenant;
-    private readonly TenantEnforceModes _oldEnforceMode;
     private readonly TenantQueryPolicies _oldQueryPolicy;
     private readonly TenantContext? _oldTenant;
     private readonly Boolean _oldOrderByKey;
@@ -158,7 +157,6 @@ public class LovControllerGuardTests : IDisposable, IClassFixture<LovControllerG
 
         _oldProvider = ManageProvider.Provider;
         _oldEnableTenant = CubeSetting.Current.EnableTenant;
-        _oldEnforceMode = CubeSetting.Current.TenantEnforceMode;
         _oldQueryPolicy = CubeSetting.Current.TenantQueryPolicy;
         _oldTenant = TenantContext.Current;
         _oldOrderByKey = PageSetting.Global.OrderByKey;
@@ -184,7 +182,6 @@ public class LovControllerGuardTests : IDisposable, IClassFixture<LovControllerG
         PageSetting.Global.OrderByKey = _oldOrderByKey;
         ManageProvider.Provider = _oldProvider;
         CubeSetting.Current.EnableTenant = _oldEnableTenant;
-        CubeSetting.Current.TenantEnforceMode = _oldEnforceMode;
         CubeSetting.Current.TenantQueryPolicy = _oldQueryPolicy;
         TenantContext.Current = _oldTenant;
     }
@@ -312,7 +309,6 @@ public class LovControllerGuardTests : IDisposable, IClassFixture<LovControllerG
         SeedRows(1101);
 
         CubeSetting.Current.EnableTenant = true;
-        CubeSetting.Current.TenantEnforceMode = TenantEnforceModes.Enforce;
         TenantContext.Current = null!;
 
         var ctrl = CreateController();

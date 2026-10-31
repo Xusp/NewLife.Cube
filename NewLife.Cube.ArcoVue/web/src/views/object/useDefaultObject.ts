@@ -11,7 +11,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { Message } from '@arco-design/web-vue';
-import { FieldKind, type MenuItem } from '@newlifex/api-core';
+import { FieldKind, type MenuItem } from '@newlifex/cube';
 import cubeApi from '@/api';
 import { useUserStore } from '@/stores/user';
 import { resolveCrudFlags } from '@/core/utils/permissions';

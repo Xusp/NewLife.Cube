@@ -8,6 +8,16 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/login/index.vue'),
   },
   {
+    path: '/register',
+    name: 'Register',
+    component: () => import('@/views/register/index.vue'),
+  },
+  {
+    path: '/forgot-password',
+    name: 'ForgotPassword',
+    component: () => import('@/views/login/forgot-password.vue'),
+  },
+  {
     path: '/',
     component: DefaultLayout,
     redirect: '/home',

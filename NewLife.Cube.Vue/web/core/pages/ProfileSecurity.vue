@@ -6,17 +6,17 @@
 -->
 <template>
   <div class="security-page">
-    <h2 class="page-title">安全中心</h2>
+    <h2 class="page-title">{{ t('security.title') }}</h2>
 
     <!-- 邮箱 -->
     <el-card class="contact-card" shadow="never">
       <div class="contact-row">
         <div class="contact-info">
-          <div class="contact-label">邮箱</div>
+          <div class="contact-label">{{ t('security.mail') }}</div>
           <div class="contact-value">
-            <span class="contact-text">{{ info?.mail || '未绑定' }}</span>
+            <span class="contact-text">{{ info?.mail || t('security.unbound') }}</span>
             <el-tag :type="info?.mailVerified ? 'success' : 'warning'" size="small">
-              {{ info?.mailVerified ? '已验证' : '未验证' }}
+              {{ info?.mailVerified ? t('security.verified') : t('security.unverified') }}
             </el-tag>
           </div>
         </div>
@@ -27,7 +27,7 @@
           size="small"
           @click="openPanel('mail')"
         >
-          {{ info?.mailVerified ? '更换' : '验证' }}
+          {{ info?.mailVerified ? t('security.change') : t('security.verify') }}
         </el-button>
       </div>
     </el-card>
@@ -36,11 +36,11 @@
     <el-card class="contact-card" shadow="never">
       <div class="contact-row">
         <div class="contact-info">
-          <div class="contact-label">手机号</div>
+          <div class="contact-label">{{ t('security.mobile') }}</div>
           <div class="contact-value">
-            <span class="contact-text">{{ info?.mobile || '未绑定' }}</span>
+            <span class="contact-text">{{ info?.mobile || t('security.unbound') }}</span>
             <el-tag :type="info?.mobileVerified ? 'success' : 'warning'" size="small">
-              {{ info?.mobileVerified ? '已验证' : '未验证' }}
+              {{ info?.mobileVerified ? t('security.verified') : t('security.unverified') }}
             </el-tag>
           </div>
         </div>
@@ -51,60 +51,104 @@
           size="small"
           @click="openPanel('sms')"
         >
-          {{ info?.mobileVerified ? '更换' : '验证' }}
+          {{ info?.mobileVerified ? t('security.change') : t('security.verify') }}
         </el-button>
       </div>
+    </el-card>
+
+    <!-- 修改密码 -->
+    <el-card class="contact-card" shadow="never">
+      <div class="contact-row">
+        <div class="contact-info">
+          <div class="contact-label">{{ t('user.changePassword') }}</div>
+          <div class="contact-value">
+            <span class="contact-text">{{ t('security.changePasswordHint') }}</span>
+          </div>
+        </div>
+        <el-button type="primary" plain size="small" data-cy="password-toggle" @click="togglePasswordPanel">
+          {{ passwordOpen ? t('security.collapse') : t('user.changePassword') }}
+        </el-button>
+      </div>
+    </el-card>
+
+    <!-- 修改密码表单 -->
+    <el-card v-if="passwordOpen" class="verify-panel" shadow="never">
+      <template #header>
+        <span>
+          {{ t('user.changePassword') }}
+          <el-button text type="primary" size="small" @click="passwordOpen = false">{{ t('security.collapse') }}</el-button>
+        </span>
+      </template>
+      <el-form label-width="110px" @submit.prevent>
+        <el-form-item :label="t('user.oldPassword')">
+          <el-input v-model="passwordForm.OldPassword" type="password" show-password autocomplete="current-password" data-cy="password-old" />
+        </el-form-item>
+        <el-form-item :label="t('user.newPassword')" required>
+          <el-input v-model="passwordForm.NewPassword" type="password" show-password autocomplete="new-password" data-cy="password-new" />
+        </el-form-item>
+        <el-form-item :label="t('user.confirmPassword')" required>
+          <el-input v-model="passwordForm.NewPassword2" type="password" show-password autocomplete="new-password" data-cy="password-confirm" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="passwordSubmitting" @click="handleChangePassword" data-cy="password-submit">
+            {{ t('security.submit') }}
+          </el-button>
+        </el-form-item>
+      </el-form>
     </el-card>
 
     <!-- 验证/更换面板 -->
     <el-card v-if="panel" class="verify-panel" shadow="never">
       <template #header>
         <span>
-          {{ panel === 'mail' ? '验证/更换邮箱' : '验证/更换手机号' }}
-          <el-button text type="primary" size="small" @click="panel = null">收起</el-button>
+          {{ panel === 'mail' ? t('security.verifyMailPanel') : t('security.verifyMobilePanel') }}
+          <el-button text type="primary" size="small" @click="panel = null">{{ t('security.collapse') }}</el-button>
         </span>
       </template>
       <el-form label-width="90px" @submit.prevent>
-        <el-form-item label="新邮箱/手机" required>
+        <el-form-item :label="t('security.newAccount')" required>
           <el-input
             v-model="verifyForm.account"
-            :placeholder="panel === 'mail' ? '请输入新邮箱' : '请输入新手机号'"
+            :placeholder="panel === 'mail' ? t('security.accountPlaceholderMail') : t('security.accountPlaceholderMobile')"
             data-cy="verify-account"
           />
         </el-form-item>
-        <el-form-item label="验证码" required>
+        <el-form-item :label="t('security.code')" required>
           <div class="code-row">
             <el-input
               v-model="verifyForm.code"
-              placeholder="请输入验证码"
+              :placeholder="t('security.codePlaceholder')"
               maxlength="6"
               data-cy="verify-code"
               @keyup.enter="handleVerify"
             />
             <el-button :disabled="sending" @click="handleSendVerifyCode">
-              {{ sending ? '发送中...' : '发送验证码' }}
+              {{ sending ? t('security.sending') : t('security.sendCode') }}
             </el-button>
           </div>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="submitting" @click="handleVerify" data-cy="verify-submit">
-            提交验证
+            {{ t('security.submit') }}
           </el-button>
         </el-form-item>
       </el-form>
     </el-card>
 
     <p class="security-tip">
-      已验证的邮箱/手机可用于接收系统通知与安全提醒。依据《中华人民共和国个人信息保护法》，请妥善保管您的联系方式。
+      {{ t('security.tip') }}
     </p>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { ElMessage } from 'element-plus';
 import request from '../utils/request';
 import { sendCode, verifyContact } from '../utils/loginApi';
+
+const { t } = useI18n();
 
 interface SecurityInfo {
   mail?: string;
@@ -123,6 +167,57 @@ const submitting = ref(false);
 const sending = ref(false);
 
 const verifyForm = reactive<{ account: string; code: string }>({ account: '', code: '' });
+
+/** 修改密码面板与表单 */
+const passwordOpen = ref(false);
+const passwordSubmitting = ref(false);
+const passwordForm = reactive<{ OldPassword: string; NewPassword: string; NewPassword2: string }>({
+  OldPassword: '',
+  NewPassword: '',
+  NewPassword2: '',
+});
+
+function togglePasswordPanel(): void {
+  passwordOpen.value = !passwordOpen.value;
+  passwordForm.OldPassword = '';
+  passwordForm.NewPassword = '';
+  passwordForm.NewPassword2 = '';
+}
+
+/** 提交修改密码（旧密码由后端按登录方式决定是否必填，SSO 登录可留空） */
+async function handleChangePassword(): Promise<void> {
+  const { OldPassword, NewPassword, NewPassword2 } = passwordForm;
+  if (!NewPassword || !NewPassword2) {
+    ElMessage.warning(t('security.enterPassword'));
+    return;
+  }
+  if (NewPassword !== NewPassword2) {
+    ElMessage.warning(t('form.passwordMismatch'));
+    return;
+  }
+
+  passwordSubmitting.value = true;
+  try {
+    const res = (await request.post('/Admin/User/ChangePassword', {
+      OldPassword,
+      NewPassword,
+      NewPassword2,
+    })) as unknown as { code?: number; message?: string };
+    if (res?.code === 0) {
+      ElMessage.success(t('user.changePasswordSuccess'));
+      passwordOpen.value = false;
+      passwordForm.OldPassword = '';
+      passwordForm.NewPassword = '';
+      passwordForm.NewPassword2 = '';
+    } else {
+      ElMessage.error(res?.message || t('user.changePasswordFailed'));
+    }
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : t('user.changePasswordFailed'));
+  } finally {
+    passwordSubmitting.value = false;
+  }
+}
 
 function isMobile(v: string): boolean {
   return /^1[3-9]\d{9}$/.test(v);
@@ -143,7 +238,7 @@ async function fetchInfo(): Promise<void> {
       info.value = res.data;
     }
   } catch (err: unknown) {
-    console.error('获取用户信息失败:', err);
+    console.error('Failed to load user info:', err);
   }
 }
 
@@ -158,15 +253,15 @@ function openPanel(channel: 'mail' | 'sms'): void {
 async function handleSendVerifyCode(): Promise<void> {
   const account = verifyForm.account.trim();
   if (!account) {
-    ElMessage.warning(panel.value === 'mail' ? '请输入邮箱' : '请输入手机号');
+    ElMessage.warning(panel.value === 'mail' ? t('security.enterMail') : t('security.enterMobile'));
     return;
   }
   if (panel.value === 'mail' && !isMail(account)) {
-    ElMessage.warning('邮箱格式不正确');
+    ElMessage.warning(t('security.invalidMail'));
     return;
   }
   if (panel.value === 'sms' && !isMobile(account)) {
-    ElMessage.warning('手机号格式不正确');
+    ElMessage.warning(t('security.invalidMobile'));
     return;
   }
 
@@ -174,12 +269,12 @@ async function handleSendVerifyCode(): Promise<void> {
   try {
     const res = await sendCode(panel.value === 'mail' ? 'Mail' : 'Sms', account, 'bind');
     if (res.code === 0) {
-      ElMessage.success('验证码已发送，请查收');
+      ElMessage.success(t('security.codeSent'));
     } else {
-      ElMessage.error(res.message || '验证码发送失败');
+      ElMessage.error(res.message || t('security.codeSendFailed'));
     }
   } catch (err: unknown) {
-    ElMessage.error(err instanceof Error ? err.message : '验证码发送失败');
+    ElMessage.error(err instanceof Error ? err.message : t('security.codeSendFailed'));
   } finally {
     sending.value = false;
   }
@@ -190,11 +285,11 @@ async function handleVerify(): Promise<void> {
   if (!panel.value) return;
   const account = verifyForm.account.trim();
   if (!account) {
-    ElMessage.warning(panel.value === 'mail' ? '请输入邮箱' : '请输入手机号');
+    ElMessage.warning(panel.value === 'mail' ? t('security.enterMail') : t('security.enterMobile'));
     return;
   }
   if (!verifyForm.code.trim()) {
-    ElMessage.warning('请输入验证码');
+    ElMessage.warning(t('security.enterCode'));
     return;
   }
 
@@ -202,15 +297,15 @@ async function handleVerify(): Promise<void> {
   try {
     const res = await verifyContact(panel.value, account, verifyForm.code.trim());
     if (res.code === 0 && res.data) {
-      ElMessage.success('验证成功');
+      ElMessage.success(t('security.verifySuccess'));
       panel.value = null;
       // 刷新验证状态
       await fetchInfo();
     } else {
-      ElMessage.error(res.message || '验证失败');
+      ElMessage.error(res.message || t('security.verifyFailed'));
     }
   } catch (err: unknown) {
-    ElMessage.error(err instanceof Error ? err.message : '验证失败，请稍后重试');
+    ElMessage.error(err instanceof Error ? err.message : t('security.verifyFailedRetry'));
   } finally {
     submitting.value = false;
   }

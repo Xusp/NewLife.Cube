@@ -126,7 +126,7 @@ class EntityModelBinder(IDictionary<ModelMetadata, IModelBinder> propertyBinders
             var modelType = bindingContext.ModelType;
             if (modelType.IsAbstract || modelType.GetConstructor(Type.EmptyTypes) == null)
             {
-                if (!bindingContext.IsTopLevelObject) throw new InvalidOperationException($"类型[{modelType.FullName}]缺少无参构造函数");
+                if (!bindingContext.IsTopLevelObject) throw new InvalidOperationException($"Type [{modelType.FullName}] has no parameterless constructor");
             }
             _modelCreator = Expression.Lambda<Func<Object>>(Expression.New(bindingContext.ModelType), Array.Empty<ParameterExpression>()).Compile();
         }
@@ -274,7 +274,7 @@ public class EntityModelBinderProvider : IModelBinderProvider
     }
 
     /// <summary>实例化</summary>
-    public EntityModelBinderProvider() => XTrace.WriteLine("注册实体模型绑定器：{0}", typeof(EntityModelBinderProvider).FullName);
+    public EntityModelBinderProvider() => XTrace.WriteLine(L.TLog("Register entity model binder: {0}", typeof(EntityModelBinderProvider).FullName));
 
     private static readonly ConcurrentDictionary<Type, Boolean> _entityModelTypes = new();
 

@@ -1,6 +1,6 @@
 import { computed, defineAsyncComponent, ref, watch, type Component } from 'vue';
 import { useRoute } from 'vue-router';
-import { FieldKind } from '@newlifex/api-core';
+import { FieldKind } from '@newlifex/cube';
 import cubeApi from '@/api';
 import { getSectionLoader } from '@/core/composables/useSections';
 import { routeToApiPrefix } from '@/core/utils/url';

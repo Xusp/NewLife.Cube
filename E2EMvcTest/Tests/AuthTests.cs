@@ -92,6 +92,15 @@ public sealed class AuthTests : IAsyncLifetime
         Assert.True(url.Contains("/User/", StringComparison.OrdinalIgnoreCase) ||
                     url.Contains("/Login", StringComparison.OrdinalIgnoreCase),
             $"[{testId}] 重复用户名注册后不应跳转离开注册/登录页。当前URL: {url}，页面标题: {await _page.TitleAsync()}");
+
+        // 注册失败必须渲染登录页（不能命中不存在的 Register 视图），并停留在注册标签显示已存在提示
+        await PageHelpers.AssertNoServerErrorAsync(_page, testId);
+        Assert.True(await _page.IsVisibleAsync("#Register.active, #Register.in"),
+            $"[{testId}] 重复用户名注册失败后应停留在注册标签页。当前URL: {url}");
+
+        var html = await _page.ContentAsync();
+        Assert.True(html.Contains("已存在", StringComparison.OrdinalIgnoreCase),
+            $"[{testId}] 重复用户名注册失败后页面未显示'已存在'提示。当前URL: {url}");
     }
 
     [Fact(DisplayName = "TC-AUTH-004 注册密码以密文传输（含 challengeId）")]
@@ -169,18 +178,22 @@ public sealed class AuthTests : IAsyncLifetime
     {
         const String testId = "TC-AUTH-016";
 
-        String? requestBody = null;
+        var loginRequest = new TaskCompletionSource<String?>(TaskCreationOptions.RunContinuationsAsynchronously);
         _page.Request += (_, req) =>
         {
             if (req.Method == "POST" && req.Url.Contains("/User/Login"))
-                requestBody = req.PostData;
+                loginRequest.TrySetResult(req.PostData);
         };
 
         await PageHelpers.GotoAndWaitAsync(_page, "/Admin/User/Login");
         await _page.FillAsync("#username", AppFixture.AdminUser);
         await _page.FillAsync("#password", AppFixture.AdminPass);
         await _page.ClickAsync("#login-btn");
-        await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        // 登录按钮先异步获取 RSA 公钥再提交表单，NetworkIdle 可能在 POST 发出前就返回，需显式等待请求
+        var completed = await Task.WhenAny(loginRequest.Task, Task.Delay(TimeSpan.FromSeconds(10)));
+        Assert.True(completed == loginRequest.Task, $"[{testId}] 未捕获到登录 POST 请求");
+        var requestBody = await loginRequest.Task;
 
         Assert.NotNull(requestBody);
         Assert.True(requestBody!.Contains("challengeId=", StringComparison.OrdinalIgnoreCase),
@@ -233,7 +246,12 @@ public sealed class AuthTests : IAsyncLifetime
             await PageHelpers.GotoAndWaitAsync(_page, "/Admin/User/Login");
             await _page.FillAsync("#username", testUser);
             await _page.FillAsync("#password", $"WrongPass@{i}");
-            await _page.ClickAsync("#login-btn");
+
+            // 登录按钮先异步获取 RSA 公钥再提交，必须等登录导航完全结束再进入下一轮，
+            // 否则下一次 GotoAsync 会中断仍在进行的登录导航（navigation interrupted）
+            await _page.RunAndWaitForNavigationAsync(
+                async () => await _page.ClickAsync("#login-btn"),
+                new PageRunAndWaitForNavigationOptions { Timeout = 15_000 });
             await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
             await PageHelpers.AssertUrlContainsAsync(_page, "/User/Login", $"{testId}[{i}]");

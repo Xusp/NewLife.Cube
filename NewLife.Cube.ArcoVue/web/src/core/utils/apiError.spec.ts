@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach } from 'vitest';
-import { ApiError } from '@newlifex/api-core';
+import { ApiError } from '@newlifex/cube';
 import { formatApiError, setStarWebResolver } from './apiError';
 
 describe('formatApiError', () => {

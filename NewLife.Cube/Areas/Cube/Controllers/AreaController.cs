@@ -24,12 +24,11 @@ public class AreaController : EntityController<Area, AreaModel>
 
         {
             var df = ListFields.GetField("ParentID") as ListField;
-            df.DisplayName = "{ParentPath}";
             df.Url = "/Cube/Area?Id={ParentID}";
         }
         {
             var df = ListFields.AddDataField("sub", "Level") as ListField;
-            df.DisplayName = "下级";
+            df.DisplayName = "Children";
             df.Url = "/Cube/Area?parentId={ID}";
         }
 
@@ -54,7 +53,7 @@ public class AreaController : EntityController<Area, AreaModel>
                     FetchAndSave(null);
 
                     var url = NewLife.Setting.Current.PluginServer.TrimSuffix("/");
-                    Import(url + "/Area.csv.gz", true, 4, true);
+                    Area.Import(url + "/Area.csv.gz", true, 4, true);
                 }, TaskCreationOptions.LongRunning);
             }
         }
@@ -164,7 +163,7 @@ public class AreaController : EntityController<Area, AreaModel>
                 list.Add(s);
             }
         }
-        if (list.Count > 200) throw new ApiException(400, "一次最多查询 200 个地区");
+        if (list.Count > 200) throw new ApiException(400, "A maximum of 200 areas can be queried at once");
         return list;
     }
 

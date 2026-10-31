@@ -23,7 +23,7 @@ import {
   validateGraph,
 } from './useWorkflowDesigner';
 import type { WfGraphData } from '@/core/types/workflow';
-import { FieldKind } from '@newlifex/api-core';
+import { FieldKind } from '@newlifex/cube';
 
 function toApprove(nodes: WfGraphData['nodes']) {
   return nodes.find((n) => n.type === 'oa.approve')!;

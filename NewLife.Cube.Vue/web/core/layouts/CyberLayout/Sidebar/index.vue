@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, provide, readonly, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { storeToRefs } from 'pinia';
 import { getConfig } from '@newlifex/cube-vue/core/configure';
 import { useMenuStore, type TreeMenuItem } from '@newlifex/cube-vue/core/stores/menu';
@@ -11,10 +12,11 @@ import LayoutSwitcher from '@newlifex/cube-vue/core/components/LayoutSwitcher.vu
 import NotificationBell from '@newlifex/cube-vue/core/components/NotificationBell.vue';
 import SearchBar from '@newlifex/cube-vue/core/components/SearchBar.vue';
 import LogoBrand from '@newlifex/cube-vue/core/components/LogoBrand.vue';
-import { renderMenuTitle } from '@newlifex/cube-vue/core/utils/menuHelpers';
+import { renderMenuTitle, filterVisibleMenuTree } from '@newlifex/cube-vue/core/utils/menuHelpers';
 import { openMenuTab } from '@newlifex/cube-vue/core/utils/menuTab';
 
 const config = getConfig();
+const { t } = useI18n();
 const menuStore = useMenuStore();
 const { treeMenus, activeMenu } = storeToRefs(menuStore);
 
@@ -22,7 +24,8 @@ const { treeMenus, activeMenu } = storeToRefs(menuStore);
 type MenuGroup = { source: TreeMenuItem; title: string; menus: TreeMenuItem[] };
 const menuGroups = computed((): MenuGroup[] => {
   if (!treeMenus.value?.length) return [];
-  return treeMenus.value.map((menu) => ({
+  // 隐藏菜单保留在 store 里用于注册路由，导航渲染时按 visible 过滤
+  return filterVisibleMenuTree(treeMenus.value).map((menu) => ({
     source: menu,
     title: menu.title || menu.name,
     menus: menu.children || [],
@@ -133,7 +136,7 @@ function isAncestorActive(menu: TreeMenuItem): boolean {
 
     <!-- 搜索框：折叠时隐藏 -->
     <div v-show="!collapsed" class="sidebar-search">
-      <SearchBar mode="box" placeholder="搜索菜单..." />
+      <SearchBar mode="box" :placeholder="t('menu.searchPlaceholder')" />
     </div>
 
     <!-- 导航菜单 -->
@@ -335,7 +338,7 @@ function isAncestorActive(menu: TreeMenuItem): boolean {
       <button
         class="sidebar-collapse-btn"
         :class="{ collapsed }"
-        :title="collapsed ? '展开侧边栏' : '折叠侧边栏'"
+        :title="collapsed ? t('layout.expandSidebar') : t('layout.collapseSidebar')"
         @click="toggleCollapse"
       >
         <svg
@@ -349,7 +352,7 @@ function isAncestorActive(menu: TreeMenuItem): boolean {
         >
           <path d="M15 18l-6-6 6-6" />
         </svg>
-        <span v-if="!collapsed" class="collapse-label">折叠侧边栏</span>
+        <span v-if="!collapsed" class="collapse-label">{{ t('layout.collapseSidebar') }}</span>
       </button>
 
       <div class="user-profile-wrap">

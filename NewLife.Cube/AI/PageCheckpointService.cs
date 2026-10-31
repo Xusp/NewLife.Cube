@@ -83,7 +83,7 @@ public class PageCheckpointService(IEventBusFactory? factory = null)
             catch (OperationCanceledException)
             {
                 // 超时或取消：返回错误结果，不阻断对话
-                return new { ok = false, error = "浏览器操作超时，前端未回传结果" }.ToJson();
+                return new { ok = false, error = L.T("Browser operation timed out; the front end returned no result") }.ToJson();
             }
         }
         finally
@@ -109,7 +109,7 @@ public class PageCheckpointService(IEventBusFactory? factory = null)
         }
         catch (Exception ex)
         {
-            XTrace.WriteLine("[Checkpoint] 回传发布失败 {0}：{1}", checkpointId, ex.Message);
+            XTrace.WriteLine("[Checkpoint] Failed to publish checkpoint {0}: {1}", checkpointId, ex.Message);
             return false;
         }
     }

@@ -7,7 +7,7 @@ vi.mock('@/api', () => ({
 }));
 
 import { dueText, modeLabel, taskStatusMeta, taskTitle, entityLabel, summaryPlain, isHandleTask, rowActionsOf } from './useWorkflowTaskList';
-import type { WorkflowTaskItem } from '@newlifex/api-core';
+import type { WorkflowTaskItem } from '@newlifex/cube';
 
 describe('modeLabel 节点模式', () => {
   it('or/and/sequence 中文', () => {

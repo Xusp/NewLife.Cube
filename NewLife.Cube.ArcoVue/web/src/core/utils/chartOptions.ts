@@ -1,4 +1,4 @@
-import type { DashboardConfig, WidgetInstance } from '@newlifex/api-core';
+import type { DashboardConfig, WidgetInstance } from '@newlifex/cube';
 
 /** GetChartData 结果归一：null 与非数组为空数组；已是数组则原样返回。 */
 export function normalizeChartOptions(data: unknown): unknown[] {

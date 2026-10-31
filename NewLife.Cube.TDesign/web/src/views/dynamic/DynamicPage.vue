@@ -1,7 +1,7 @@
 <template>
   <div>
-    <!-- ECharts 图表区域 -->
-    <div v-if="chartList.length" style="margin-bottom: 16px;">
+    <!-- ECharts 图表区域（图表视图） -->
+    <div v-if="viewMode === 'chart' && chartList.length" style="margin-bottom: 16px;">
       <div
         v-for="(_, idx) in chartList"
         :key="idx"
@@ -9,6 +9,7 @@
         style="width: 100%; height: 400px; background: var(--td-bg-color-container); border-radius: 6px; margin-bottom: 8px;"
       />
     </div>
+    <t-empty v-else-if="viewMode === 'chart'" description="暂无图表" style="margin-bottom: 16px" />
 
     <!-- Toolbar -->
     <t-space style="margin-bottom: 16px" breakLine>
@@ -17,10 +18,11 @@
       <t-dropdown v-if="canExport" :options="exportOptions" @click="handleExport">
         <t-button variant="outline">导出 <chevron-down-icon /></t-button>
       </t-dropdown>
-      <t-upload v-if="canImport" :action="`${typePath}/ImportFile`" :auto-upload="true" theme="custom" accept=".csv,.xls,.xlsx" @success="loadData">
+      <t-upload v-if="canImport" :action="`${typePath}/import`" :auto-upload="true" theme="custom" accept=".csv,.xls,.xlsx" @success="loadData">
         <t-button variant="outline">导入</t-button>
       </t-upload>
       <div style="flex: 1" />
+      <t-button variant="outline" @click="toggleView">{{ viewMode === 'table' ? '图表' : '表格' }}</t-button>
       <t-input v-model="keyword" placeholder="搜索..." style="width: 240px" clearable @enter="handleSearch">
         <template #suffix-icon><search-icon @click="handleSearch" style="cursor: pointer" /></template>
       </t-input>
@@ -28,6 +30,7 @@
 
     <!-- Table -->
     <t-table
+      v-show="viewMode === 'table'"
       :data="data"
       :columns="tableColumns"
       :loading="loading"
@@ -48,6 +51,7 @@
           <FieldInput :field="f" v-model="formData[toCamelCase(f.name)]" />
         </t-form-item>
       </t-form>
+      <t-alert v-if="formError" theme="error" :message="formError" style="margin-top: 12px" />
       <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px">
         <t-button variant="outline" @click="showForm = false">取消</t-button>
         <t-button theme="primary" @click="handleSave">保存</t-button>
@@ -77,8 +81,9 @@ import { SearchIcon, ChevronDownIcon } from 'tdesign-icons-vue-next';
 import { api } from '@/api';
 import { useUserStore } from '@/stores/user';
 import FieldInput from '@/components/FieldInput.vue';
-import { Auth, type DataField } from '@newlifex/api-core';
-import { toCamelCase } from '@newlifex/field-mapping';
+import { Auth, type DataField } from '@newlifex/cube';
+import { toCamelCase, resolveColumnWidth, resolveColumnAlign } from '@newlifex/cube';
+import { normalizeChartList, shouldDisposeCharts, toggleListView, validateRequiredFields } from '@newlifex/cube';
 import { Button as TButton } from 'tdesign-vue-next';
 import * as echarts from 'echarts';
 
@@ -119,6 +124,7 @@ const statData = ref<Record<string, unknown> | null>(null);
 
 // Dialog
 const showForm = ref(false);
+const formError = ref('');
 const showDetail = ref(false);
 const showDeleteConfirm = ref(false);
 const deleteTargetId = ref<number | null>(null);
@@ -129,6 +135,22 @@ const isEdit = ref(false);
 // ECharts
 const chartList = ref<any[]>([]);
 const chartInstances = ref<any[]>([]);
+
+/** 视图模式：表格 / 图表 */
+const viewMode = ref<'table' | 'chart'>('table');
+
+function toggleView() {
+  viewMode.value = toggleListView(viewMode.value);
+}
+
+// 离开图表视图时释放实例，避免隐藏容器尺寸为 0 导致图表错位
+watch(viewMode, (mode) => {
+  if (!shouldDisposeCharts(mode)) return;
+  for (const inst of chartInstances.value) {
+    inst?.dispose();
+  }
+  chartInstances.value = [];
+});
 
 // 统计行（footData）
 const footData = computed(() => {
@@ -148,7 +170,13 @@ const footData = computed(() => {
 const tableColumns = computed(() => {
   const cols: any[] = [{ colKey: 'row-select', type: 'multiple', width: 50 }];
   for (const f of listFields.value) {
-    cols.push({ colKey: toCamelCase(f.name), title: f.displayName || f.name, ellipsis: true });
+    cols.push({
+      colKey: toCamelCase(f.name),
+      title: f.displayName || f.name,
+      ellipsis: true,
+      width: resolveColumnWidth(f),
+      align: resolveColumnAlign(f),
+    });
   }
   cols.push({
     colKey: 'op', title: '操作', width: 180, fixed: 'right',
@@ -206,7 +234,7 @@ async function loadData() {
 async function loadChartData() {
   try {
     const res = await api.page.getChartData(typePath.value);
-    chartList.value = Array.isArray(res.data) && res.data.length > 0 ? res.data : [];
+    chartList.value = normalizeChartList(res.data);
   } catch {
     chartList.value = [];
   }
@@ -229,13 +257,14 @@ function onChartResize() {
 function handleSearch() { pageIndex.value = 1; loadData(); }
 
 // CRUD
-function handleAdd() { formData.value = {}; isEdit.value = false; showForm.value = true; }
+function handleAdd() { formData.value = {}; isEdit.value = false; formError.value = ''; showForm.value = true; }
 
 async function handleEditById(id: number) {
   try {
     const res = await api.page.getDetail(typePath.value, id);
     formData.value = res?.data ? { ...res.data } : {};
     isEdit.value = true;
+    formError.value = '';
     showForm.value = true;
   } catch { /* ignore */ }
 }
@@ -249,6 +278,13 @@ async function handleDetail(id: number) {
 }
 
 async function handleSave() {
+  // 表单键为字段名的小驼峰形式，校验时按同一口径取值
+  const invalid = validateRequiredFields(editFields.value as any, formData.value, toCamelCase);
+  if (invalid.length) {
+    formError.value = invalid.map((e) => e.message).join('；');
+    return;
+  }
+  formError.value = '';
   try {
     if (isEdit.value) await api.page.update(typePath.value, formData.value);
     else await api.page.add(typePath.value, formData.value);

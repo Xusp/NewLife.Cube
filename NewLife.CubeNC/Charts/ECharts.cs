@@ -72,8 +72,8 @@ public class ECharts : IExtend
     public IDictionary<String, Object> Items { get; set; } = new NullableDictionary<String, Object>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>扩展数据</summary>
-    /// <param name="key"></param>
-    /// <returns></returns>
+    /// <param name="key">配置项键名</param>
+    /// <returns>配置项值</returns>
     public Object this[String key] { get => Items[key]; set => Items[key] = value; }
 
     /// <summary>附加JavaScript脚本</summary>
@@ -174,7 +174,7 @@ public class ECharts : IExtend
     Object GetTimeValue(IModel entity) => _timeSelector != null ? _timeSelector(entity) : entity[_timeField];
 
     /// <summary>设置Y轴</summary>
-    /// <param name="name"></param>
+    /// <param name="name">Y 轴名称</param>
     /// <param name="type">
     /// 坐标轴类型。
     /// value 数值轴，适用于连续数据。
@@ -190,7 +190,7 @@ public class ECharts : IExtend
     }
 
     /// <summary>设置Y轴</summary>
-    /// <param name="name"></param>
+    /// <param name="name">Y 轴名称</param>
     /// <param name="type">
     /// 坐标轴类型。
     /// value 数值轴，适用于连续数据。
@@ -198,7 +198,7 @@ public class ECharts : IExtend
     /// time 时间轴，适用于连续的时序数据，与数值轴相比时间轴带有时间的格式化，在刻度计算上也有所不同，例如会根据跨度的范围来决定使用月，星期，日还是小时范围的刻度。
     /// log 对数轴。适用于对数数据。
     /// </param>
-    /// <param name="formatter"></param>
+    /// <param name="formatter">数值格式化模板</param>
     public YAxis SetY(String name, String type, String formatter)
     {
         var axis = new YAxis { Name = name, Type = type, AxisLabel = new { formatter } };
@@ -207,7 +207,7 @@ public class ECharts : IExtend
     }
 
     /// <summary>设置多个Y轴</summary>
-    /// <param name="names"></param>
+    /// <param name="names">Y 轴名称集合</param>
     /// <param name="type">
     /// 坐标轴类型。
     /// value 数值轴，适用于连续数据。
@@ -249,7 +249,7 @@ public class ECharts : IExtend
     /// none, 什么都不触发。
     /// </param>
     /// <param name="axisPointerType">坐标轴指示器配置项。cross，坐标系会自动选择显示哪个轴的 axisPointer</param>
-    /// <param name="backgroundColor"></param>
+    /// <param name="backgroundColor">提示框背景色，空则使用主题默认</param>
     public Tooltip SetTooltip(String trigger = "axis", String axisPointerType = "cross", String backgroundColor = "#6a7985")
     {
         return Tooltip = new Tooltip
@@ -291,10 +291,10 @@ public class ECharts : IExtend
         if (formatterScript.IsNullOrEmpty()) throw new ArgumentNullException(nameof(formatterScript));
 
         var p = formatterScript.IndexOf("function") + "function".Length;
-        if (p < 0) throw new ArgumentOutOfRangeException(nameof(formatterScript), "无效js函数");
+        if (p < 0) throw new ArgumentOutOfRangeException(nameof(formatterScript), "Invalid js function");
 
         var p2 = formatterScript.IndexOf('(', p);
-        if (p2 < 0) throw new ArgumentOutOfRangeException(nameof(formatterScript), "无效js函数");
+        if (p2 < 0) throw new ArgumentOutOfRangeException(nameof(formatterScript), "Invalid js function");
 
         var name = formatterScript[p..p2].Trim();
 
@@ -311,14 +311,14 @@ public class ECharts : IExtend
 
     /// <summary>设置图例</summary>
     /// <typeparam name="T"></typeparam>
-    /// <param name="list"></param>
-    /// <param name="field"></param>
-    /// <param name="selector"></param>
+    /// <param name="list">数据源列表</param>
+    /// <param name="field">字段元数据，提供显示名</param>
+    /// <param name="selector">取显示名的选择器</param>
     public void SetLegend<T>(IList<T> list, FieldItem field, Func<T, String> selector = null) where T : IModel
         => Legend = new Legend { Data = list.Select(e => selector == null ? e[field.Name] + "" : selector(e)).ToArray() };
 
     /// <summary>设置图例</summary>
-    /// <param name="names"></param>
+    /// <param name="names">图例名称集合</param>
     public void SetLegend(String[] names) => Legend = new Legend { Data = names };
 
     /// <summary>设置工具栏</summary>
@@ -327,7 +327,7 @@ public class ECharts : IExtend
     /// <param name="top">顶部。默认top</param>
     /// <param name="magicTypes">动态类型切换。默认line+bar+stack</param>
     /// <param name="dataView">显示数据视图。默认true</param>
-    /// <returns></returns>
+    /// <returns>工具箱配置项</returns>
     public Toolbox SetToolbox(String orient = "horizontal", String left = "right", String top = "auto", String[] magicTypes = null, Boolean dataView = true)
     {
         if (magicTypes == null || magicTypes.Length == 0) magicTypes = ["line", "bar", "stack"];
@@ -356,9 +356,9 @@ public class ECharts : IExtend
     }
 
     /// <summary>添加缩放。默认X0轴，其它设置可直接修改返回对象</summary>
-    /// <param name="start"></param>
-    /// <param name="end"></param>
-    /// <returns></returns>
+    /// <param name="start">缩放起始百分比</param>
+    /// <param name="end">缩放结束百分比</param>
+    /// <returns>缩放配置项</returns>
     public DataZoom AddDataZoom(Int32 start = 0, Int32 end = 100)
     {
         var dz = new DataZoom
@@ -379,7 +379,7 @@ public class ECharts : IExtend
 
     #region 方法
     /// <summary>添加系列数据</summary>
-    /// <param name="series"></param>
+    /// <param name="series">待添加的系列</param>
     public void Add(Series series)
     {
         Series.Add(series);
@@ -425,10 +425,10 @@ public class ECharts : IExtend
     }
 
     /// <summary>创建系列图</summary>
-    /// <param name="name"></param>
-    /// <param name="type"></param>
-    /// <param name="data"></param>
-    /// <returns></returns>
+    /// <param name="name">系列名称</param>
+    /// <param name="type">系列类型</param>
+    /// <param name="data">系列数据</param>
+    /// <returns>新建的系列</returns>
     public Series Create(String name, SeriesTypes type, Object[] data = null)
     {
         var sr = type switch
@@ -466,13 +466,33 @@ public class ECharts : IExtend
         return sr;
     }
 
+    /// <summary>获取数据字段的显示名。字段元数据保存中文源文，按当前界面语言本地化后再用于系列名与图例</summary>
+    /// <param name="field">数据字段</param>
+    /// <returns>本地化后的显示名</returns>
+    private static String GetDisplayName(DataField field)
+    {
+        if (field == null) return null;
+
+        return L.T(field.DisplayName.IsNullOrEmpty() ? field.Name : field.DisplayName);
+    }
+
+    /// <summary>获取数据字段的显示名。字段元数据保存中文源文，按当前界面语言本地化后再用于系列名与图例</summary>
+    /// <param name="field">数据字段</param>
+    /// <returns>本地化后的显示名</returns>
+    private static String GetDisplayName(FieldItem field)
+    {
+        if (field == null) return null;
+
+        return L.T(field.DisplayName.IsNullOrEmpty() ? field.Name : field.DisplayName);
+    }
+
     /// <summary>添加系列数据</summary>
     /// <typeparam name="T"></typeparam>
     /// <param name="list">实体列表</param>
     /// <param name="name">要使用数据的字段</param>
     /// <param name="type">图表类型，默认折线图line</param>
     /// <param name="selector">数据选择器，默认null时直接使用字段数据</param>
-    /// <returns></returns>
+    /// <returns>新建的系列</returns>
     public Series Add<T>(IList<T> list, String name, String type = "line", Func<T, Object> selector = null) where T : IModel
     {
         if (type.IsNullOrEmpty()) type = "line";
@@ -496,7 +516,7 @@ public class ECharts : IExtend
     /// <param name="field">要使用数据的字段</param>
     /// <param name="type">图表类型，默认折线图line</param>
     /// <param name="selector">数据选择器，默认null时直接使用字段数据</param>
-    /// <returns></returns>
+    /// <returns>新建的系列</returns>
     public Series Add<T>(IList<T> list, FieldItem field, String type = "line", Func<T, Object> selector = null) where T : IModel
     {
         if (type.IsNullOrEmpty()) type = "line";
@@ -505,7 +525,7 @@ public class ECharts : IExtend
             list.Select(e => new Object[] { GetTimeValue(e), selector == null ? e[field.Name] : selector(e) }).ToArray() :
             list.Select(e => selector == null ? e[field.Name] : selector(e)).ToArray();
 
-        var sr = Create(field?.DisplayName ?? field.Name, type, data);
+        var sr = Create(GetDisplayName(field), type, data);
 
         if (!Symbol.IsNullOrEmpty()) sr.Symbol = Symbol;
 
@@ -519,14 +539,14 @@ public class ECharts : IExtend
     /// <param name="field">要使用数据的字段</param>
     /// <param name="type">图表类型，默认折线图line</param>
     /// <param name="selector">数据选择器，默认null时直接使用字段数据</param>
-    /// <returns></returns>
+    /// <returns>新建的系列</returns>
     public Series Add<T>(IList<T> list, FieldItem field, SeriesTypes type, Func<T, Object> selector = null) where T : IModel
     {
         var data = _timeField != null ?
             list.Select(e => new Object[] { GetTimeValue(e), selector == null ? e[field.Name] : selector(e) }).ToArray() :
             list.Select(e => selector == null ? e[field.Name] : selector(e)).ToArray();
 
-        var sr = Create(field?.DisplayName ?? field.Name, type, data);
+        var sr = Create(GetDisplayName(field), type, data);
 
         if (!Symbol.IsNullOrEmpty()) sr.Symbol = Symbol;
 
@@ -540,7 +560,7 @@ public class ECharts : IExtend
     /// <param name="fields">要使用数据的字段</param>
     /// <param name="type">图表类型，默认折线图line</param>
     /// <param name="selector">数据选择器，默认null时直接使用字段数据</param>
-    /// <returns></returns>
+    /// <returns>新建的系列列表</returns>
     public IList<Series> Add<T>(IList<T> list, DataField[] fields, SeriesTypes type = SeriesTypes.Line, Func<T, Object> selector = null) where T : IModel
     {
         var rs = new List<Series>();
@@ -559,7 +579,7 @@ public class ECharts : IExtend
                 list.Select(e => new Object[] { GetTimeValue(e), selector == null ? e[field.Name] : selector(e) }).ToArray() :
                 list.Select(e => selector == null ? e[field.Name] : selector(e)).ToArray();
 
-                series = Create(field?.DisplayName ?? field.Name, type, data);
+                series = Create(GetDisplayName(field), type, data);
 
                 if (!Symbol.IsNullOrEmpty()) series.Symbol = Symbol;
 
@@ -577,7 +597,7 @@ public class ECharts : IExtend
     /// <param name="name">要使用数据的字段</param>
     /// <param name="selector">数据选择器，默认null时直接使用字段数据</param>
     /// <param name="smooth">折线光滑</param>
-    /// <returns></returns>
+    /// <returns>新建的折线系列</returns>
     public Series AddLine<T>(IList<T> list, String name, Func<T, Object> selector = null, Boolean smooth = false) where T : IModel => AddLine(list, new DataField { Name = name }, selector, smooth);
 
     /// <summary>添加曲线系列数据</summary>
@@ -586,14 +606,14 @@ public class ECharts : IExtend
     /// <param name="field">要使用数据的字段</param>
     /// <param name="selector">数据选择器，默认null时直接使用字段数据</param>
     /// <param name="smooth">折线光滑</param>
-    /// <returns></returns>
+    /// <returns>新建的折线系列</returns>
     public Series AddLine<T>(IList<T> list, DataField field, Func<T, Object> selector = null, Boolean? smooth = null) where T : IModel
     {
         var data = _timeField != null ?
             list.Select(e => new Object[] { GetTimeValue(e), selector == null ? e[field.Name] : selector(e) }).ToArray() :
             list.Select(e => selector == null ? e[field.Name] : selector(e)).ToArray();
 
-        var sr = Create(field?.DisplayName ?? field.Name, "line", data) as SeriesLine;
+        var sr = Create(GetDisplayName(field), "line", data) as SeriesLine;
         sr.Smooth = smooth;
 
         if (!Symbol.IsNullOrEmpty()) sr.Symbol = Symbol;
@@ -608,15 +628,21 @@ public class ECharts : IExtend
     /// <param name="field">要使用数据的字段</param>
     /// <param name="selector">数据选择器，默认null时直接使用字段数据</param>
     /// <param name="smooth">折线光滑</param>
-    /// <returns></returns>
-    public Series AddLine<T>(IList<T> list, FieldItem field, Func<T, Object> selector = null, Boolean smooth = false) where T : IModel => AddLine(list, new DataField(field), selector, smooth);
+    /// <returns>新建的折线系列</returns>
+    public Series AddLine<T>(IList<T> list, FieldItem field, Func<T, Object> selector = null, Boolean smooth = false) where T : IModel
+    {
+        var df = new DataField(field);
+        df.Localize();
+
+        return AddLine(list, df, selector, smooth);
+    }
 
     /// <summary>添加柱状图</summary>
     /// <typeparam name="T"></typeparam>
     /// <param name="list">实体列表</param>
     /// <param name="name">要使用数据的字段</param>
     /// <param name="selector">数据选择器，默认null时直接使用字段数据</param>
-    /// <returns></returns>
+    /// <returns>新建的柱状系列</returns>
     public Series AddBar<T>(IList<T> list, String name, Func<T, Object> selector = null) where T : IModel => AddBar(list, new DataField { Name = name }, selector);
 
     /// <summary>添加柱状图</summary>
@@ -624,14 +650,14 @@ public class ECharts : IExtend
     /// <param name="list">实体列表</param>
     /// <param name="field">要使用数据的字段</param>
     /// <param name="selector">数据选择器，默认null时直接使用字段数据</param>
-    /// <returns></returns>
+    /// <returns>新建的柱状系列</returns>
     public Series AddBar<T>(IList<T> list, DataField field, Func<T, Object> selector = null) where T : IModel
     {
         var data = _timeField != null ?
             list.Select(e => new Object[] { GetTimeValue(e), selector == null ? e[field.Name] : selector(e) }).ToArray() :
             list.Select(e => selector == null ? e[field.Name] : selector(e)).ToArray();
 
-        var sr = Create(field?.DisplayName ?? field.Name, "bar", data);
+        var sr = Create(GetDisplayName(field), "bar", data);
 
         Add(sr);
         return sr;
@@ -642,8 +668,14 @@ public class ECharts : IExtend
     /// <param name="list">实体列表</param>
     /// <param name="field">要使用数据的字段</param>
     /// <param name="selector">数据选择器，默认null时直接使用字段数据</param>
-    /// <returns></returns>
-    public Series AddBar<T>(IList<T> list, FieldItem field, Func<T, Object> selector = null) where T : IModel => AddBar(list, new DataField(field), selector);
+    /// <returns>新建的柱状系列</returns>
+    public Series AddBar<T>(IList<T> list, FieldItem field, Func<T, Object> selector = null) where T : IModel
+    {
+        var df = new DataField(field);
+        df.Localize();
+
+        return AddBar(list, df, selector);
+    }
 
     /// <summary>添加饼图</summary>
     /// <typeparam name="T"></typeparam>
@@ -652,7 +684,7 @@ public class ECharts : IExtend
     /// <param name="valueName">要使用数据的字段</param>
     /// <param name="displayName">显示名</param>
     /// <param name="selector">数据选择器，默认null时直接使用字段数据</param>
-    /// <returns></returns>
+    /// <returns>新建的饼图系列</returns>
     public Series AddPie<T>(IList<T> list, String keyName, String valueName, String displayName, Func<T, NameValue> selector = null) where T : IModel
     {
         var sr = Create(displayName ?? valueName, "pie");
@@ -667,14 +699,14 @@ public class ECharts : IExtend
     /// <param name="list">实体列表</param>
     /// <param name="field">数据字段</param>
     /// <param name="selector">数据选择器，默认null时直接使用字段数据</param>
-    /// <returns></returns>
+    /// <returns>新建的饼图系列</returns>
     public Series AddPie<T>(IList<T> list, DataField field, Func<T, NameValue> selector = null) where T : IModel
     {
         var keyName = field.Category;
         keyName ??= _xField as String;
         keyName ??= (_xField as DataField)?.Name;
         keyName ??= (_xField as FieldItem)?.Name;
-        var sr = Create(field?.DisplayName ?? field.Name, "pie");
+        var sr = Create(GetDisplayName(field), "pie");
         sr.Data = list.Select(e => selector == null ? new NameValue(e[keyName] + "", e[field.Name]) : selector(e)).ToArray();
 
         Add(sr);
@@ -686,14 +718,14 @@ public class ECharts : IExtend
     /// <param name="list">实体列表</param>
     /// <param name="field">要使用数据的字段</param>
     /// <param name="selector">数据选择器，默认null时直接使用字段数据</param>
-    /// <returns></returns>
+    /// <returns>新建的饼图系列</returns>
     public Series AddPie<T>(IList<T> list, FieldItem field, Func<T, NameValue> selector = null) where T : IModel
     {
         var keyName = _xField as String;
         keyName ??= (_xField as DataField)?.Name;
         keyName ??= (_xField as FieldItem)?.Name;
         keyName ??= field.Table.Master?.Name ?? field.Table.PrimaryKeys.FirstOrDefault()?.Name;
-        var sr = Create(field?.DisplayName ?? field.Name, "pie");
+        var sr = Create(GetDisplayName(field), "pie");
         sr.Data = list.Select(e => selector == null ? new NameValue(e[keyName] + "", e[field.Name]) : selector(e)).ToArray();
 
         Add(sr);
@@ -701,8 +733,8 @@ public class ECharts : IExtend
     }
 
     /// <summary>添加关系图。有向图/引力图</summary>
-    /// <param name="model"></param>
-    /// <returns></returns>
+    /// <param name="model">关系图模型</param>
+    /// <returns>关系图系列</returns>
     public Series AddGraph(GraphViewModel model)
     {
         var graph = Create(model.Title, SeriesTypes.Graph) as SeriesGraph;
@@ -740,7 +772,7 @@ public class ECharts : IExtend
     /// <param name="name">图例名称</param>
     /// <param name="items">数据集</param>
     /// <param name="itemNames">五个名字。不一定是最小值最大值</param>
-    /// <returns></returns>
+    /// <returns>箱线图系列</returns>
     public Series AddBoxplot(String name, IEnumerable<BoxplotItem> items, String[] itemNames = null)
     {
         var box = Create(!name.IsNullOrEmpty() ? name : "boxplot", SeriesTypes.Boxplot) as SeriesBoxplot;
@@ -756,27 +788,27 @@ public class ECharts : IExtend
         var script = """
                 function boxplotFormatter(params) {
                     return `${params.name}<br/>
-                    最小值: ${params.value[1]}<br/>
-                    下四分: ${params.value[2]}<br/>
-                    中位数: ${params.value[3]}<br/>
-                    上四分: ${params.value[4]}<br/>
-                    最大值: ${params.value[5]}`;
+                    Min: ${params.value[1]}<br/>
+                    Q1: ${params.value[2]}<br/>
+                    Median: ${params.value[3]}<br/>
+                    Q3: ${params.value[4]}<br/>
+                    Max: ${params.value[5]}`;
                 }
                 """;
         if (itemNames != null && itemNames.Length >= 5)
         {
             // 名称为null时表示不替换
-            if (itemNames[0] != null) script = script.Replace("最小值", itemNames[0]);
-            if (itemNames[1] != null) script = script.Replace("下四分", itemNames[1]);
-            if (itemNames[2] != null) script = script.Replace("中位数", itemNames[2]);
-            if (itemNames[3] != null) script = script.Replace("上四分", itemNames[3]);
-            if (itemNames[4] != null) script = script.Replace("最大值", itemNames[4]);
+            if (itemNames[0] != null) script = script.Replace("Min:", itemNames[0] + ":");
+            if (itemNames[1] != null) script = script.Replace("Q1:", itemNames[1] + ":");
+            if (itemNames[2] != null) script = script.Replace("Median:", itemNames[2] + ":");
+            if (itemNames[3] != null) script = script.Replace("Q3:", itemNames[3] + ":");
+            if (itemNames[4] != null) script = script.Replace("Max:", itemNames[4] + ":");
         }
 
         SetTooltip("item", script);
 
         // 添加Y轴
-        if (YAxis == null || YAxis.Count == 0) SetY("值", "value");
+        if (YAxis == null || YAxis.Count == 0) SetY(L.T("Value"), "value");
 
         return box;
     }
@@ -785,7 +817,7 @@ public class ECharts : IExtend
     /// <param name="name">图例名称</param>
     /// <param name="items">数据集</param>
     /// <param name="itemNames">四个名字。不一定是最小值最大值</param>
-    /// <returns></returns>
+    /// <returns>K 线图系列</returns>
     public Series AddCandlestick(String name, IEnumerable<CandlestickItem> items, String[] itemNames = null)
     {
         var box = Create(!name.IsNullOrEmpty() ? name : "candlestick", SeriesTypes.Candlestick) as SeriesCandlestick;
@@ -801,25 +833,25 @@ public class ECharts : IExtend
         var script = """
                 function candlestickFormatter(params) {
                     return `${params.name}<br/>
-                    开盘值: ${params.value[1]}<br/>
-                    收盘值: ${params.value[2]}<br/>
-                    最低值: ${params.value[3]}<br/>
-                    最高值: ${params.value[4]}`;
+                    Open: ${params.value[1]}<br/>
+                    Close: ${params.value[2]}<br/>
+                    Low: ${params.value[3]}<br/>
+                    High: ${params.value[4]}`;
                 }
                 """;
         if (itemNames != null && itemNames.Length >= 4)
         {
             // 名称为null时表示不替换
-            if (itemNames[0] != null) script = script.Replace("开盘值", itemNames[0]);
-            if (itemNames[1] != null) script = script.Replace("收盘值", itemNames[1]);
-            if (itemNames[2] != null) script = script.Replace("最低值", itemNames[2]);
-            if (itemNames[3] != null) script = script.Replace("最高值", itemNames[3]);
+            if (itemNames[0] != null) script = script.Replace("Open:", itemNames[0] + ":");
+            if (itemNames[1] != null) script = script.Replace("Close:", itemNames[1] + ":");
+            if (itemNames[2] != null) script = script.Replace("Low:", itemNames[2] + ":");
+            if (itemNames[3] != null) script = script.Replace("High:", itemNames[3] + ":");
         }
 
         SetTooltip("item", script);
 
         // 添加Y轴
-        if (YAxis == null || YAxis.Count == 0) SetY("值", "value");
+        if (YAxis == null || YAxis.Count == 0) SetY(L.T("Value"), "value");
 
         return box;
     }
@@ -827,7 +859,7 @@ public class ECharts : IExtend
 
     #region 构建生成
     /// <summary>构建选项Json</summary>
-    /// <returns></returns>
+    /// <returns>图表配置 JSON</returns>
     public String Build()
     {
         var dic = new Dictionary<String, Object>();
@@ -907,8 +939,8 @@ public class ECharts : IExtend
     }
 
     /// <summary>获取Json对象，去掉空成员</summary>
-    /// <param name="obj"></param>
-    /// <returns></returns>
+    /// <param name="obj">待序列化的对象</param>
+    /// <returns>可被 JSON 序列化的对象</returns>
     protected virtual Object GetJsonObject(Object obj)
     {
         if (obj == null) return obj;

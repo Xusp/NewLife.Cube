@@ -1,6 +1,6 @@
 import { computed, ref, watch } from 'vue';
 import { Message, Modal } from '@arco-design/web-vue';
-import type { EntityAutomationListItem } from '@newlifex/api-core';
+import type { EntityAutomationListItem } from '@newlifex/cube';
 import cubeApi from '@/api';
 import { formatApiError } from '@/core/utils/apiError';
 import { formatDateTime } from '@/core/utils/datetime';

@@ -59,7 +59,7 @@ public class WorkflowWriteInterceptor : EntityInterceptor
         catch (Exception ex)
         {
             // Workflow 连接未初始化/表不存在等一律放行，避免影响非工作流宿主
-            XTrace.WriteLine("WorkflowWriteInterceptor 检查跳过：{0}", ex.Message);
+            XTrace.WriteLine("WorkflowWriteInterceptor check skipped: {0}", ex.Message);
             return true;
         }
     }
@@ -91,25 +91,25 @@ public class WorkflowWriteInterceptor : EntityInterceptor
         var scope = WorkflowWriteScope.Current;
         if (scope != null)
         {
-            if (scope.InstanceId != instance.Id) throw new WorkflowException(403, "审批写通道与实例不匹配");
-            if (method == DataMethod.Delete) throw new WorkflowException(403, "审批中禁止删除");
+            if (scope.InstanceId != instance.Id) throw new WorkflowException(403, "The approval write channel does not match the instance");
+            if (method == DataMethod.Delete) throw new WorkflowException(403, "Deleting is not allowed during approval");
             if (scope.FieldNames.Count > 0 && dirty.Any(e => !scope.FieldNames.Contains(e)))
-                throw new WorkflowException(403, $"审批中仅允许修改节点可写字段：[{String.Join(",", scope.FieldNames)}]");
+                throw new WorkflowException(403, $"During approval only node-writable fields can be changed: [{String.Join(",", scope.FieldNames)}]");
             return true;
         }
 
-        if (method == DataMethod.Delete) throw new WorkflowException(403, "审批中禁止删除，请先结束流程");
+        if (method == DataMethod.Delete) throw new WorkflowException(403, "Deleting is not allowed during approval; end the flow first");
         if (policy == WorkflowStatuses.LockFull)
-            throw new WorkflowException(403, "审批中不可修改，请通过审批流程处理");
+            throw new WorkflowException(403, "Cannot modify during approval; use the approval process instead");
 
         // nodeFields：仅当前节点候选人可按节点可写字段改
         var userId = ManageProvider.User?.ID ?? 0;
-        if (userId <= 0) throw new WorkflowException(403, "审批中不可修改");
+        if (userId <= 0) throw new WorkflowException(403, "Cannot modify during approval");
 
         var writable = CurrentWritable(instance, userId);
-        if (writable.Count == 0) throw new WorkflowException(403, "当前用户不是节点候选人，审批中不可修改");
+        if (writable.Count == 0) throw new WorkflowException(403, "The current user is not a node candidate and cannot modify during approval");
         if (dirty.Any(e => !writable.Contains(e)))
-            throw new WorkflowException(403, $"审批中仅允许修改节点可写字段：[{String.Join(",", writable)}]");
+            throw new WorkflowException(403, $"During approval only node-writable fields can be changed: [{String.Join(",", writable)}]");
         return true;
     }
 

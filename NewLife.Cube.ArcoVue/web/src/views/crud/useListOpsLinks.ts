@@ -1,5 +1,5 @@
 import { Message } from '@arco-design/web-vue';
-import { resolveUrl } from '@newlifex/page-utils';
+import { resolveUrl } from '@newlifex/cube';
 import type { Router } from 'vue-router';
 import cubeApi from '@/api';
 import type { OpsCustomLink } from '@/core/utils/opsAction';

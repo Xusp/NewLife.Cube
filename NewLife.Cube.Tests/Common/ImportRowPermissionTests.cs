@@ -152,7 +152,7 @@ public class ImportRowPermissionTests
         var ctrl = CreateController(SelfScope());
 
         var ex = Assert.Throws<NoPermissionException>(() => ctrl.TestValidImport([NewRow(userId: 2)], ImportMode.Insert, 0));
-        Assert.Contains("归属为他人", ex.Message);
+        Assert.Contains("belongs to another user", ex.Message);
     }
 
     [Fact(DisplayName = "导入_新增_本人与他部门范围内放行")]
@@ -169,7 +169,7 @@ public class ImportRowPermissionTests
         var ctrl = CreateController(DeptScope(1, 10));
 
         var ex = Assert.Throws<NoPermissionException>(() => ctrl.TestValidImport([NewRow(deptId: 99)], ImportMode.Insert, 0));
-        Assert.Contains("不在当前数据范围", ex.Message);
+        Assert.Contains("outside the current data scope", ex.Message);
     }
 
     [Fact(DisplayName = "导入_合并_覆盖不可见行拒绝")]
@@ -179,7 +179,7 @@ public class ImportRowPermissionTests
         ctrl.Existing = NewRow(id: 5, userId: 2, deptId: 99);
 
         var ex = Assert.Throws<NoPermissionException>(() => ctrl.TestValidImport([NewRow(id: 5)], ImportMode.Merge, 100));
-        Assert.Contains("将覆盖不可见数据", ex.Message);
+        Assert.Contains("would overwrite invisible data", ex.Message);
     }
 
     [Fact(DisplayName = "导入_合并_可见行放行")]
@@ -216,7 +216,7 @@ public class ImportRowPermissionTests
 
         // 测试实体未注册页面菜单，按 fail-closed 拒绝（系统角色不受约束）
         var ex = Assert.Throws<NoPermissionException>(() => ctrl.TestValidImportEntity(ImportPlainEntity.Meta.Factory));
-        Assert.Contains("无权导入", ex.Message);
+        Assert.Contains("Not allowed to import", ex.Message);
     }
 
     [Fact(DisplayName = "导入_跨实体数据集_当前实体放行")]

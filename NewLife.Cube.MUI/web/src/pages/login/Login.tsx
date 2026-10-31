@@ -6,7 +6,7 @@ import {
 } from '@mui/material';
 import { useUserStore } from '@/stores/user';
 import api from '@/api';
-import type { LoginConfig } from '@newlifex/api-core';
+import type { LoginConfig, SiteConfig } from '@newlifex/cube';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -18,10 +18,24 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [config, setConfig] = useState<LoginConfig | null>(null);
+  const [siteConfig, setSiteConfig] = useState<SiteConfig | null>(null);
+  const registerEnabled = config?.register?.enabled === true;
+  /** 是否展示「忘记密码」入口：重置密码依赖短信/邮件通道，两个通道都关时无意义 */
+  const forgotEnabled = config?.login?.sms === true || config?.login?.mail === true;
+  const oauthProviders = config?.oauth ?? [];
+  const tenantCode = params.get('tenant') ?? params.get('tenantCode') ?? params.get('code') ?? undefined;
 
   useEffect(() => {
-    api.user.getLoginConfig().then((res) => setConfig(res.data)).catch(() => {});
-  }, []);
+    api.user.getLoginConfig(tenantCode).then((res) => setConfig(res.data)).catch(() => {});
+    // 品牌、Logo、登录提示与版权由匿名接口 /Cube/Site 提供，失败时回退内置默认
+    api.site.getSite(tenantCode).then((res) => setSiteConfig(res.data)).catch(() => {});
+  }, [tenantCode]);
+
+  /** 进入注册页时保留租户等查询参数 */
+  const goRegister = () => {
+    const search = params.toString();
+    navigate(search ? `/register?${search}` : '/register');
+  };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -46,9 +60,9 @@ export default function Login() {
       <Card sx={{ width: 400, p: 2 }}>
         <CardContent>
           <Box textAlign="center" mb={3}>
-            {config?.logo && <Avatar src={config.logo} sx={{ width: 64, height: 64, mx: 'auto', mb: 1 }} />}
-            <Typography variant="h5">{config?.displayName ?? '魔方管理平台'}</Typography>
-            {config?.loginTip && <Typography variant="body2" color="text.secondary">{config.loginTip}</Typography>}
+            {siteConfig?.logo && <Avatar src={siteConfig.logo} sx={{ width: 64, height: 64, mx: 'auto', mb: 1 }} />}
+            <Typography variant="h5">{siteConfig?.name ?? '魔方管理平台'}</Typography>
+            {siteConfig?.loginTip && <Typography variant="body2" color="text.secondary">{siteConfig.loginTip}</Typography>}
           </Box>
 
           {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
@@ -68,20 +82,35 @@ export default function Login() {
             </Button>
           </form>
 
-          {config?.providers?.length ? (
+          {oauthProviders.length ? (
             <>
               <Divider sx={{ my: 2 }}>其他登录方式</Divider>
               <Stack direction="row" spacing={1} justifyContent="center">
-                {config.providers.map((p) => (
+                {oauthProviders.map((p) => (
                   <Button key={p.name} variant="outlined" size="small"
                     startIcon={p.logo ? <Avatar src={p.logo} sx={{ width: 20, height: 20 }} /> : undefined}
-                    onClick={() => { window.location.href = `/Sso/Login?provider=${encodeURIComponent(p.name)}`; }}
+                    onClick={() => { window.location.href = `/Sso/Login/${encodeURIComponent(p.name)}?source=front-end&redirect_uri=${encodeURIComponent(window.location.origin + '/')}`; }}
                   >
                     {p.nickName ?? p.name}
                   </Button>
                 ))}
               </Stack>
             </>
+          ) : null}
+
+          {forgotEnabled ? (
+            <Box textAlign="center" mt={1}>
+              <Button size="small" onClick={() => navigate('/forgot-password')}>忘记密码？</Button>
+            </Box>
+          ) : null}
+
+          {registerEnabled ? (
+            <Box textAlign="center" mt={2}>
+              <Typography variant="body2" color="text.secondary" component="span">
+                还没有账号？
+              </Typography>
+              <Button size="small" onClick={goRegister}>立即注册</Button>
+            </Box>
           ) : null}
         </CardContent>
       </Card>

@@ -1,6 +1,6 @@
 import { computed, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import type { InboxMessageItem } from '@newlifex/api-core';
+import type { InboxMessageItem } from '@newlifex/cube';
 import cubeApi from '@/api';
 import { formatDateTime } from '@/core/utils/datetime';
 import { parseInboxUnreadCount, resolveInboxTotal } from '@/core/utils/inboxBadge';

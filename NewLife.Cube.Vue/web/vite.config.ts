@@ -1,4 +1,3 @@
-import { join } from 'path';
 import { fileURLToPath, URL } from 'node:url';
 
 import { defineConfig } from 'vite';
@@ -12,7 +11,7 @@ import cubeFront from './core/plugin/index'; // This is the plugin we want to bu
 import { CodeInspectorPlugin } from 'code-inspector-plugin';
 
 // https://vite.dev/config/
-export default defineConfig(({ command, mode }) => {
+export default defineConfig(() => {
   // Check an environment variable to determine the build target
   if (process.env.BUILD_TARGET === 'plugin') {
     return {
@@ -79,6 +78,9 @@ export default defineConfig(({ command, mode }) => {
         },
       },
       build: {
+        // esbuild 只转译语法、不 polyfill 内置方法；框架已使用 Array.prototype.at 等 ES2022 API，
+        // 目标低于 es2022 会在旧内核上运行期报错，故与 tsconfig 的 lib 一同对齐到 es2022
+        target: 'es2022',
         sourcemap: true, // Generates source maps for better debugging
         outDir: '../wwwroot',
         emptyOutDir: true,

@@ -227,7 +227,7 @@ public class WorkbenchController(TokenService tokenService) : ControllerBaseX
             ut.Expire = DateTime.Now.AddSeconds(expireSec);
             ut.Save();
 
-            WriteLog("分享", true, url);
+            WriteLog("Share", true, url);
 
             return Json(0, null, new
             {

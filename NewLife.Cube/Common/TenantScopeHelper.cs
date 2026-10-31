@@ -9,7 +9,7 @@ namespace NewLife.Cube;
 /// 从 <c>ReadOnlyEntityController2.CreateWhere</c> 的多租户分支抽出（OSC-260926c2b8），
 /// 作为实体列表与值集等取数出口共用的单一租户规则，避免两套判定漂移。
 /// <para>判定顺序：未启用多租户 / 非 ITenantScope 实体 / 管理后台模式 → 不加过滤；</para>
-/// <para>Shadow 期无租户上下文 → 兼容放行（影子日志）；Enforce 无租户上下文 → fail-closed；</para>
+/// <para>无租户上下文 → 按 <c>TenantQueryPolicy</c>：ThrowOnMissingTenant 抛 <see cref="NoPermissionException"/>，否则 fail-closed 返回空集；</para>
 /// <para>ThrowOnMissingTenant 策略 → 抛 <see cref="NoPermissionException"/>；租户模式 → 按 TenantId 过滤（Tenant 实体按主键）。</para>
 /// </remarks>
 public static class TenantScopeHelper
@@ -59,26 +59,16 @@ public static class TenantScopeHelper
 
         var ctxTenant = TenantContext.Current;
 
-        // 无租户上下文（未设置/匿名请求）：
-        // [TenantCompat] 影子期规则A：不加租户过滤（等同多租户开启前），仅记录影子日志；
-        // Enforce 严格 fail-closed，返回空集，防止无租户场景看到全量数据。
+        // 无租户上下文（未设置/匿名请求）：严格 fail-closed，返回空集，防止无租户场景看到全量数据
         if (ctxTenant.GetTenantMode() == TenantMode.None)
         {
-            if (set.TenantEnforceMode == TenantEnforceModes.Shadow)
-            {
-                XTrace.WriteLine($"[TenantCompat] 无租户上下文，兼容放行不加过滤：{factory.EntityType.Name}");
-                // 数据日志（CreateLog 落库）；无租户上下文场景用户信息非重点
-                ManagerProviderHelper.WriteTenantCompatDataLog("影子兼容放行", $"无租户上下文，兼容放行不加过滤 实体[{factory.EntityType.Name}]", null, NewLife.Web.HttpContext.Current?.Connection?.RemoteIpAddress + "");
-                return (TenantFilterKinds.None, 0);
-            }
-
             if (set.TenantQueryPolicy == TenantQueryPolicies.ThrowOnMissingTenant)
             {
                 // 对外 API 可配置为显式抛错，而不是"假空数据"（P2-7）
-                throw new NoPermissionException(PermissionFlags.None, $"缺少租户上下文，禁止查询{factory.EntityType.Name}");
+                throw new NoPermissionException(PermissionFlags.None, L.T("Tenant context is missing; querying {0} is not allowed.", factory.EntityType.Name));
             }
 
-            XTrace.WriteLine($"多租户模式下缺少租户上下文，禁止查询{factory.EntityType.Name}");
+            XTrace.WriteLine("Tenant context is missing in multi-tenant mode; querying {0} is not allowed.", factory.EntityType.Name);
             return (TenantFilterKinds.Empty, 0);
         }
 
@@ -90,7 +80,7 @@ public static class TenantScopeHelper
         tenant ??= Tenant.FindById(ctxTenant.TenantId);
         if (tenant == null || !tenant.Enable)
         {
-            XTrace.WriteLine($"多租户模式下租户[{ctxTenant.TenantId}]不存在或已禁用，禁止查询{factory.EntityType.Name}");
+            XTrace.WriteLine($"Tenant [{ctxTenant.TenantId}] does not exist or is disabled in multi-tenant mode; querying {factory.EntityType.Name} is not allowed");
             return (TenantFilterKinds.Empty, 0);
         }
 

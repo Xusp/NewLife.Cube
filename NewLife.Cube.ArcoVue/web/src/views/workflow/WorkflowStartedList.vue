@@ -4,7 +4,7 @@
  */
 import { computed, ref } from 'vue';
 import type { FieldMeta } from '@/core/types/field';
-import type { WorkflowInstanceItem } from '@newlifex/api-core';
+import type { WorkflowInstanceItem } from '@newlifex/cube';
 import type { ViewGroup } from '@/core/utils/viewProfile';
 import { formatDateTime } from '@/core/utils/datetime';
 import { instanceStatusMeta } from './useWorkflowProgress';

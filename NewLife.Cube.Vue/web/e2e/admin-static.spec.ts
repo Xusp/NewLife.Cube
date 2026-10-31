@@ -1,0 +1,81 @@
+import { test, expect } from '@playwright/test';
+
+/**
+ * 系统管理区域的静态页回归：文件管理与数据库管理无法用 `/meta` 表达（目录浏览、二进制下载、
+ * 备份动作），由 `apps/cube-admin/src/views/admin/{file,db}/index.vue` 整页接管。
+ *
+ * 文件管理受 `CubeSetting.EnableFileManager` 开关控制（默认关闭，关闭时后端所有文件接口返回 403），
+ * 用例内临时开启并在结束时恢复，避免污染环境配置。断言只用结构选择器，不绑定界面语言。
+ */
+const apiBase = process.env.PLAYWRIGHT_API_URL || 'https://localhost:7116';
+
+async function setFileManager(page: import('@playwright/test').Page, enabled: boolean) {
+  const res = await page.request.get(`${apiBase}/api/Admin/Cube`, { ignoreHTTPSErrors: true });
+  const body = await res.json();
+  const model = body?.data ?? {};
+  model.enableFileManager = enabled;
+
+  const put = await page.request.put(`${apiBase}/api/Admin/Cube`, {
+    data: model,
+    ignoreHTTPSErrors: true,
+  });
+  expect(put.ok()).toBeTruthy();
+}
+
+// 全局配置开关不能并发切换，否则另一条用例读到中间态
+test.describe.configure({ mode: 'serial' });
+
+test.describe('系统管理静态页', () => {
+  test('文件管理：开关控制目录列表与行内动作', async ({ page }) => {
+    await setFileManager(page, true);
+    try {
+      await page.goto('/Admin/File');
+      await expect(page.locator('h1')).toBeVisible({ timeout: 20000 });
+
+      // 目录根路径由环境配置决定：本地仓库有文件，全新库/CI 可能为空，此时只校验空态不误报
+      const rows = page.locator('.el-table__body tr');
+      const rowCount = await rows.count();
+      if (rowCount > 0) {
+        const row = rows.first();
+        await expect(row).toBeVisible({ timeout: 20000 });
+
+        // 行内动作是 MVC 文件管理器的核心能力：下载/压缩/解压/复制/删除，少一个都算功能缺失
+        expect(await row.locator('button').count()).toBeGreaterThanOrEqual(5);
+      } else {
+        test.info().annotations.push({ type: 'note', description: '当前环境文件目录为空，跳过行内动作校验' });
+      }
+    } finally {
+      await setFileManager(page, false);
+    }
+
+    // 关闭后接口返回 403，页面给出开启提示且不再列出目录
+    await page.goto('/Admin/File');
+    await expect(page.locator('h1')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByText(/未启用|disabled|not enabled/i).first()).toBeVisible({ timeout: 20000 });
+    expect(await page.locator('.el-table__body tr').count()).toBe(0);
+  });
+
+  test('数据库管理：清单、表结构与模型差异可查看', async ({ page }) => {
+    await page.goto('/Admin/Db');
+    await expect(page.locator('h1')).toBeVisible({ timeout: 20000 });
+
+    // 数据库清单：名称/类型/版本/驱动/驱动版本/实体数/表数/备份数/操作
+    const row = page.locator('.el-table__body tr').first();
+    await expect(row).toBeVisible({ timeout: 20000 });
+    expect(await page.locator('.el-table__header th').count()).toBeGreaterThanOrEqual(9);
+    expect(await row.locator('button').count()).toBeGreaterThanOrEqual(7);
+
+    // 表结构弹窗（行内第一个动作「查看表」）
+    await row.locator('button').nth(0).click();
+    await expect(page.locator('.schema-table').first()).toBeVisible({ timeout: 20000 });
+    await expect(page.locator('.schema-table .el-table').first()).toBeVisible();
+    // 关闭后内容仍留在 DOM（v-show），只能断言不可见
+    await page.locator('.el-dialog__footer button').first().click();
+    await expect(page.locator('.schema-table').first()).toBeHidden({ timeout: 10000 });
+
+    // 模型差异弹窗（行内第三个动作）：差异条目带 XML 片段
+    await row.locator('button').nth(2).click();
+    await expect(page.locator('.diff-item').first()).toBeVisible({ timeout: 20000 });
+    await expect(page.locator('.diff-xml').first()).toBeVisible();
+  });
+});

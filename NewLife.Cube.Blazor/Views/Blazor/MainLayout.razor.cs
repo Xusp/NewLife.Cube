@@ -146,10 +146,10 @@ namespace NewLife.Cube.Blazor.Views.Blazor
             var user = _provider.Current as IUser ?? XCode.Membership.User.FindAll().FirstOrDefault();
 
             var fact = ManageProvider.Menu;
-            var menus = fact.Root.Childs;
+            var menus = NewLife.Cube.Membership.MenuHelper.FilterAvailable(fact.Root.Childs);
             if (user?.Role != null)
             {
-                menus = fact.GetMySubMenus(fact.Root.ID, user, true);
+                menus = NewLife.Cube.Membership.MenuHelper.FilterAvailable(fact.GetMySubMenus(fact.Root.ID, user, true));
             }
 
             // 如果顶级只有一层，并且至少有三级目录，则提升一级
@@ -157,7 +157,7 @@ namespace NewLife.Cube.Blazor.Views.Blazor
 
             var menuTree = MenuTree.GetMenuTree(pMenuTree =>
             {
-                var subMenus = fact.GetMySubMenus(pMenuTree.ID, user, true);
+                var subMenus = NewLife.Cube.Membership.MenuHelper.FilterAvailable(fact.GetMySubMenus(pMenuTree.ID, user, true));
                 return subMenus;
             }, list =>
             {
@@ -168,12 +168,12 @@ namespace NewLife.Cube.Blazor.Views.Blazor
                                 {
                                     ID = menu.ID,
                                     Name = menu.Name,
-                                    DisplayName = menu.DisplayName ?? menu.Name,
+                                    DisplayName = NewLife.Cube.Membership.MenuHelper.GetDisplayName(menu),
                                     Url = menu.Url,
                                     Icon = menu.Icon,
                                     Visible = menu.Visible,
                                     ParentID = menu.ParentID,
-                                    Permissions = menu.Permissions
+                                    Permissions = NewLife.Cube.Membership.MenuHelper.GetPermissions(menu)
                                 }).ToList();
                 return menuList.Count > 0 ? menuList : null;
             }, menus);

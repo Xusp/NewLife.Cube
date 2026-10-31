@@ -3,7 +3,7 @@
  * 效率页（OSC-260922201a T6）：菜单 URL /Cube/Workflow/Efficiency。薄 .vue，逻辑见 useWorkflowEfficiency。
  * 单层不换页：行点击下钻筛选、月/节点行就地展开最慢 10 条、点最慢记录标题开进度抽屉。
  */
-import type { WorkflowEfficiencyRow } from '@newlifex/api-core';
+import type { WorkflowEfficiencyRow } from '@newlifex/cube';
 import {
   formatDuration,
   formatRate,

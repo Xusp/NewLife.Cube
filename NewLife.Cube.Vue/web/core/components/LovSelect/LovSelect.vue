@@ -5,7 +5,8 @@
       v-if="loading && !resolvedType"
       disabled
       loading
-      placeholder="加载中..."
+      :placeholder="t('lovSelect.loading')"
+      :size="size"
       style="width: 100%"
     />
 
@@ -18,10 +19,11 @@
       :collapse-tags="multiple"
       :collapse-tags-tooltip="multiple"
       :max-collapse-tags="3"
-      :placeholder="placeholder"
+      :placeholder="placeholder ?? t('lovSelect.select')"
       :clearable="clearable"
       :disabled="disabled"
       :loading="loading"
+      :size="size"
       :suffix-icon="Search"
       style="width: 100%"
       @visible-change="handleListVisibleChange"
@@ -45,6 +47,10 @@
       :translate-cache="translateCache"
       :multiple="multiple"
       :model-value="listSelectValue"
+      :page-size="pageSize"
+      :width="dialogWidth"
+      :height="dialogHeight"
+      :size="size"
       @select="handleTableSelect"
       @confirm="handleTableMultiConfirm"
     />
@@ -56,28 +62,30 @@
       multiple
       collapse-tags
       collapse-tags-tooltip
-      :placeholder="placeholder"
+      :placeholder="placeholder ?? t('lovSelect.select')"
       :clearable="clearable"
       :disabled="disabled"
       :loading="loading"
+      :size="size"
       style="width: 100%"
       @change="handleMultiChange"
     >
-      <el-option v-for="opt in options" :key="opt.value" :label="opt.label" :value="opt.value" />
+      <el-option v-for="opt in filteredOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
     </el-select>
 
     <!-- 枚举型 · 单选 -->
     <el-select
       v-else
       v-model="selectedValue"
-      :placeholder="placeholder"
+      :placeholder="placeholder ?? t('lovSelect.select')"
       :clearable="clearable"
       :disabled="disabled"
       :loading="loading"
+      :size="size"
       style="width: 100%"
       @change="handleEnumChange"
     >
-      <el-option v-for="opt in options" :key="opt.value" :label="opt.label" :value="opt.value" />
+      <el-option v-for="opt in filteredOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
     </el-select>
   </div>
 </template>
@@ -86,10 +94,12 @@
 // 显式声明组件名，确保 Vue DevTools 显示为 LovSelect（不依赖目录/文件名推断）
 defineOptions({ name: 'LovSelect' });
 import { toRef, computed, onMounted, ref, nextTick } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { Search } from '@element-plus/icons-vue';
 import LovSelectTable from '../LovSelectTable/index.vue';
-import { useLovSelect } from './useLovSelect';
+import { useLovSelect, type LovValue } from './useLovSelect';
 import { getSelectedLabel } from '@newlifex/cube-vue/core/components/LovSelect/lovStore';
+import type { LovValueType } from '@newlifex/cube-vue/core/types/lov';
 
 const props = withDefaults(
   defineProps<{
@@ -102,18 +112,32 @@ const props = withDefaults(
     size?: 'large' | 'default' | 'small';
     /** 是否为多选（multipleSelect 场景），emit string[] */
     multiple?: boolean;
+    /** 级联父级值：非空时 ENUM 选项按 option.parent 过滤（父变自动清空子选择） */
+    parent?: string | number;
+    /** 输出值类型：auto=ENUM 出数字·LIST 原生；number/string=强制归一（承 ADR-064） */
+    valueType?: LovValueType;
+    /** 列表型弹窗：每页条数，默认 10 */
+    pageSize?: number;
+    /** 列表型弹窗宽度，默认 680px */
+    dialogWidth?: string | number;
+    /** 列表型弹窗表格高度（固定表头 + 滚动），不设置则随内容自适应 */
+    dialogHeight?: string | number;
   }>(),
   {
-    placeholder: '请选择',
+    placeholder: undefined,
     clearable: true,
     disabled: false,
     multiple: false,
+    parent: undefined,
+    valueType: 'auto',
   },
 );
 
+const { t } = useI18n();
+
 const emit = defineEmits<{
-  (e: 'update:modelValue', value: string | number | string[] | undefined): void;
-  (e: 'change', value: string | number | string[] | undefined): void;
+  (e: 'update:modelValue', value: LovValue): void;
+  (e: 'change', value: LovValue): void;
 }>();
 
 // ── 逻辑/事件全部委托给 useLovSelect；本组件只做「绑定模板 + emit 转发」的薄壳 ──
@@ -121,6 +145,7 @@ const {
   loading,
   resolvedType,
   options,
+  filteredOptions,
   selectedValue,
   selectedValues,
   dialogVisible,
@@ -138,6 +163,8 @@ const {
   code: toRef(props, 'code'),
   modelValue: toRef(props, 'modelValue'),
   multiple: toRef(props, 'multiple'),
+  parent: toRef(props, 'parent'),
+  valueType: toRef(props, 'valueType'),
 });
 
 // hook 不含生命周期，组件在挂载后显式加载元数据
@@ -174,7 +201,7 @@ const listTags = computed(() => {
   return v != null && v !== '' ? [{ value: v, label: fill(v) }] : [];
 });
 
-function emitChange(value: string | number | string[] | undefined) {
+function emitChange(value: LovValue) {
   emit('update:modelValue', value);
   emit('change', value);
 }
@@ -183,7 +210,7 @@ function handleEnumChange(val: string | number | undefined) {
   emitChange(onEnumChange(val));
 }
 
-function handleMultiChange(val: string[]) {
+function handleMultiChange(val: Array<string | number>) {
   emitChange(onEnumMultiChange(val));
 }
 

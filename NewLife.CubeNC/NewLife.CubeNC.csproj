@@ -5,11 +5,12 @@
     <TargetFrameworks>net6.0;net7.0;net8.0;net9.0;net10.0</TargetFrameworks>
     <RootNamespace>NewLife.Cube</RootNamespace>
     <AssemblyName>NewLife.Cube</AssemblyName>
-    <AssemblyTitle>魔方快速开发平台MVC版</AssemblyTitle>
-    <Description>魔方MVC/Razor兼容层，支持ASP.NET Core MVC传统开发模式。提供用户权限管理、Razor视图模板、SSO登录、OAuth服务端、数据导出等功能，单表100亿级数据验证。</Description>
+    <AssemblyTitle>NewLife Cube MVC Library</AssemblyTitle>
+    <Description>Cube MVC/Razor layer of the NewLife framework: ASP.NET Core MVC hosting, Razor view templates, user permission management, SSO sign-in, OAuth server, data export and runtime localization, validated with 10 billion rows in a single table.</Description>
+    <PackageDescription>Cube MVC/Razor layer of the NewLife framework: ASP.NET Core MVC hosting, Razor view templates, user permission management, SSO sign-in, OAuth server, data export and runtime localization, validated with 10 billion rows in a single table. 魔方MVC/Razor兼容层：支持ASP.NET Core MVC传统开发模式，提供用户权限管理、Razor视图模板、SSO登录、OAuth服务端、数据导出与运行时多语言，单表100亿级数据验证。</PackageDescription>
     <Company>新生命开发团队</Company>
     <Copyright>©2002-2026 NewLife</Copyright>
-    <VersionPrefix>6.15</VersionPrefix>
+    <VersionPrefix>6.16</VersionPrefix>
     <VersionSuffix>$([System.DateTime]::Now.ToString(`yyyy.MMdd`))</VersionSuffix>
     <Version>$(VersionPrefix).$(VersionSuffix)</Version>
     <FileVersion>$(Version)</FileVersion>
@@ -35,13 +36,13 @@
     <RepositoryUrl>https://github.com/NewLifeX/NewLife.Cube</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>新生命团队;X组件;NewLife;$(AssemblyName)</PackageTags>
-    <PackageReleaseNotes>集成 Scalar API 文档；新增 SVG 文字头像、工作台部件体系与 /Cube/Widget 管理、表格列自定义设置、多租户开关与租户切换；导出增强（xlsx 全量导出、Zip 导出、CSV 表头与 SYLK 防护）；地区管理地图模式与省市区级联选择器；修复导出 Xml 误输出 Json、SVG 头像溢出、SSO 头像抓取、分页页码约定等问题；升级 NewLife.Core/XCode 等核心依赖</PackageReleaseNotes>
+    <PackageReleaseNotes>接入编译期词表并将运行时语言扩展到 31 种，API、MVC 视图与 Vue 前端全量本地化；API 标准端点收敛为 RESTful 子资源（meta、{id}、PUT、DELETE、charts/export/import/attachments），原 GetPage/GetFields 等端点下线；新增自描述 meta 与 page-logic 页面呈现配置，列表支持列宽对齐、树形、stat 汇总与批量启用禁用；CubeTable 组件与页面引擎落地，八个 SPA 皮肤补齐工作台真实数据、多标签页、卡片拖拽、窄屏抽屉与列表图表切换；安全防御内置威胁检测、自动封禁与可信代理学习，修复认证绕过、上传穿越、越权并加固 SSO；数据权限回归接口层，用户页非系统角色只读、部门按管理者过滤；新增账号注销扩展点、单设备登录踢旧设备与登录配置 v2；NativeAOT 冒烟 18 场景、多 OS 架构矩阵与 TFM 守门，升级 NewLife.Core 12.0、XCode 12.3、Remoting 4.0 等 2026-10-24 正式版依赖</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-    <PackageReadmeFile>Readme.MD</PackageReadmeFile>
+    <PackageReadmeFile>README.nuget.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
@@ -52,12 +53,19 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="NewLife.AI" Version="1.6.2026.901" />
-    <PackageReference Include="NewLife.Core" Version="11.19.2026.901" />
-    <PackageReference Include="NewLife.IP" Version="2.5.2026.804" />
-    <PackageReference Include="NewLife.Office" Version="1.4.2026.901" />
-    <PackageReference Include="NewLife.Stardust.Extensions" Version="3.10.2026.901" />
-    <PackageReference Include="NewLife.XCode" Version="12.2.2026.901" />
+    <!-- 与 API 版共用同一份词表：NewLife.Cube/Locales 为唯一事实源 -->
+    <AdditionalFiles Include="..\NewLife.Cube\Locales\*.yml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NewLife.AI" Version="1.7.2026.1024" />
+    <PackageReference Include="NewLife.Core" Version="12.0.2026.1024" />
+    <PackageReference Include="NewLife.IP" Version="2.6.2026.1024" />
+    <PackageReference Include="NewLife.Office" Version="1.5.2026.1024" />
+    <!-- Stardust 传递依赖 NewLife.Remoting，最小版本 3.9.2026.901 面向 Core 11 构建，与 Core 12 不兼容；显式提升到 Core 12 版本 -->
+    <PackageReference Include="NewLife.Remoting" Version="4.0.2026.1024" />
+    <PackageReference Include="NewLife.Stardust.Extensions" Version="3.10.2026.1024" />
+    <PackageReference Include="NewLife.XCode" Version="12.3.2026.1024" />
   </ItemGroup>
 
   <ItemGroup>
@@ -82,15 +90,20 @@
 
   <ItemGroup>
     <Compile Include="..\NewLife.Cube\Common\ApiFilterAttribute.cs" Link="Common\ApiFilterAttribute.cs" />
-    <Compile Include="..\NewLife.Cube\Common\AppControllerBase.cs" Link="Common\AppControllerBase.cs" />
-    <Compile Include="..\NewLife.Cube\Common\BaseController.cs" Link="Common\BaseController.cs" />
+    <Compile Include="..\NewLife.Cube\Common\ApiResponse.cs" Link="Common\ApiResponse.cs" />
     <Compile Include="..\NewLife.Cube\Common\DataPermissionAttribute.cs" Link="Common\DataPermissionAttribute.cs" />
     <Compile Include="..\NewLife.Cube\Common\EntityController2.cs" Link="Common\EntityController2.cs" />
     <Compile Include="..\NewLife.Cube\Common\FormRequiredHelper.cs" Link="Common\FormRequiredHelper.cs" />
+    <Compile Include="..\NewLife.Cube\Common\EntityController.Response.cs" Link="Common\EntityController.Response.cs" />
     <Compile Include="..\NewLife.Cube\Common\MembershipExtensions.cs" Link="Common\MembershipExtensions.cs" />
     <Compile Include="..\NewLife.Cube\Common\NoPermissionException.cs" Link="Common\NoPermissionException.cs" />
     <Compile Include="..\NewLife.Cube\Common\OAuthController.cs" Link="Common\OAuthController.cs" />
     <Compile Include="..\NewLife.Cube\Common\PageSetting.cs" Link="Common\PageSetting.cs" />
+    <Compile Include="..\NewLife.Cube\Common\ToolbarBuilder.cs" Link="Common\ToolbarBuilder.cs" />
+    <Compile Include="..\NewLife.Cube\Attributes\ToolbarButtonAttribute.cs" Link="Attributes\ToolbarButtonAttribute.cs" />
+    <Compile Include="..\NewLife.Cube\Attributes\IdempotentAttribute.cs" Link="Attributes\IdempotentAttribute.cs" />
+    <Compile Include="..\NewLife.Cube\ViewModels\ToolbarItem.cs" Link="ViewModels\ToolbarItem.cs" />
+    <Compile Include="..\NewLife.Cube\ViewModels\ToolbarCollection.cs" Link="ViewModels\ToolbarCollection.cs" />
     <Compile Include="..\NewLife.Cube\Common\ReadOnlyEntityController2.cs" Link="Common\ReadOnlyEntityController2.cs" />
     <Compile Include="..\NewLife.Cube\Common\ReadOnlyEntityControllerScope.cs" Link="Common\ReadOnlyEntityControllerScope.cs" />
     <Compile Include="..\NewLife.Cube\Common\CubeDataScope.cs" Link="Common\CubeDataScope.cs" />
@@ -98,6 +111,8 @@
     <Compile Include="..\NewLife.Cube\Common\LovEntityGuard.cs" Link="Common\LovEntityGuard.cs" />
     <Compile Include="..\NewLife.Cube\Common\TreeParentSourceHelper.cs" Link="Common\TreeParentSourceHelper.cs" />
     <Compile Include="..\NewLife.Cube\Common\ValidFormatHelper.cs" Link="Common\ValidFormatHelper.cs" />
+    <Compile Include="..\NewLife.Cube\Common\ExportCap.cs" Link="Common\ExportCap.cs" />
+    <Compile Include="..\NewLife.Cube\Common\TreeDescendantExpand.cs" Link="Common\TreeDescendantExpand.cs" />
     <Compile Include="..\NewLife.Cube\Common\EntityPageRegistry.cs" Link="Common\EntityPageRegistry.cs" />
     <Compile Include="..\NewLife.Cube\Common\ViewHelper.cs" Link="Common\ViewHelper.cs" />
     <Compile Include="..\NewLife.Cube\Common\SortWhitelist.cs" Link="Common\SortWhitelist.cs" />
@@ -112,12 +127,9 @@
     <Compile Include="..\NewLife.Cube\Entity\Models\AttachmentModel.cs" Link="Entity\Models\AttachmentModel.cs" />
     <Compile Include="..\NewLife.Cube\Entity\Models\CronJobModel.cs" Link="Entity\Models\CronJobModel.cs" />
     <Compile Include="..\NewLife.Cube\Entity\Models\MailConfigModel.cs" Link="Entity\Models\MailConfigModel.cs" />
-    <Compile Include="..\NewLife.Cube\Entity\Models\ModelColumnModel.cs" Link="Entity\Models\ModelColumnModel.cs" />
-    <Compile Include="..\NewLife.Cube\Entity\Models\ModelTableModel.cs" Link="Entity\Models\ModelTableModel.cs" />
     <Compile Include="..\NewLife.Cube\Entity\Models\NotificationRecordModel.cs" Link="Entity\Models\NotificationRecordModel.cs" />
     <Compile Include="..\NewLife.Cube\Entity\Models\OAuthConfigModel.cs" Link="Entity\Models\OAuthConfigModel.cs" />
     <Compile Include="..\NewLife.Cube\Entity\Models\OAuthLogModel.cs" Link="Entity\Models\OAuthLogModel.cs" />
-    <Compile Include="..\NewLife.Cube\Entity\Models\OrderManagerModel.cs" Link="Entity\Models\OrderManagerModel.cs" />
     <Compile Include="..\NewLife.Cube\Entity\Models\PrincipalAgentModel.cs" Link="Entity\Models\PrincipalAgentModel.cs" />
     <Compile Include="..\NewLife.Cube\Entity\Models\SmsConfigModel.cs" Link="Entity\Models\SmsConfigModel.cs" />
     <Compile Include="..\NewLife.Cube\Entity\Models\UserConnectModel.cs" Link="Entity\Models\UserConnectModel.cs" />
@@ -175,15 +187,15 @@
     <Compile Include="..\NewLife.Cube\Extensions\Pager.cs" Link="Extensions\Pager.cs" />
     <Compile Include="..\NewLife.Cube\Extensions\PagerHelper.cs" Link="Extensions\PagerHelper.cs" />
     <Compile Include="..\NewLife.Cube\Extensions\WebHelper.cs" Link="Extensions\WebHelper.cs" />
+    <Compile Include="..\NewLife.Cube\Membership\MenuHelper.Availability.cs" Link="Membership\MenuHelper.Availability.cs" />
+    <Compile Include="..\NewLife.Cube\Membership\MenuHelper.Naming.cs" Link="Membership\MenuHelper.Naming.cs" />
+    <Compile Include="..\NewLife.Cube\Models\CubeCode.cs" Link="Models\CubeCode.cs" />
     <Compile Include="..\NewLife.Cube\Models\ImportContext.cs" Link="Models\ImportContext.cs" />
     <Compile Include="..\NewLife.Cube\Models\ServiceResult.cs" Link="Models\ServiceResult.cs" />
     <Compile Include="..\NewLife.Cube\Models\TokenInModel.cs" Link="Models\TokenInModel.cs" />
-    <Compile Include="..\NewLife.Cube\Models\VerifyCodeModel.cs" Link="Models\VerifyCodeModel.cs" />
-    <Compile Include="..\NewLife.Cube\Services\ICaptchaService.cs" Link="Services\ICaptchaService.cs" />
     <Compile Include="..\NewLife.Cube\Services\Auth\AuthCacheKeys.cs" Link="Services\Auth\AuthCacheKeys.cs" />
     <Compile Include="..\NewLife.Cube\Services\Auth\AuthHelper.cs" Link="Services\Auth\AuthHelper.cs" />
     <Compile Include="..\NewLife.Cube\Services\IMfaService.cs" Link="Services\IMfaService.cs" />
-    <Compile Include="..\NewLife.Cube\Services\DrawingCaptchaService.cs" Link="Services\DrawingCaptchaService.cs" />
     <Compile Include="..\NewLife.Cube\Services\TotpMfaService.cs" Link="Services\TotpMfaService.cs" />
     <Compile Include="..\NewLife.Cube\Services\IAttachmentStorage.cs" Link="Services\IAttachmentStorage.cs" />
     <Compile Include="..\NewLife.Cube\Services\LocalAttachmentStorage.cs" Link="Services\LocalAttachmentStorage.cs" />
@@ -255,32 +267,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Remove="Areas\Cube\Views\ModelTable\**" />
-    <Content Remove="Areas\Cube\Views\ModelTable\**" />
-    <EmbeddedResource Remove="Areas\Cube\Views\ModelTable\**" />
-    <None Remove="Areas\Cube\Views\ModelTable\**" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Compile Remove="Areas\Cube\Controllers\ModelColumnController.cs" />
-    <Compile Remove="Areas\Cube\Controllers\ModelTableController.cs" />
-    <Compile Remove="Common\ApplicationManager.cs" />
-    <Compile Remove="Common\ITenantController.cs" />
-    <Compile Remove="Extensions\ItemsExtend.cs" />
-    <Compile Remove="Services\AliyunClient.cs" />
-    <Compile Remove="ViewModels\FieldModel.cs" />
-    <Compile Remove="WebMiddleware\TracerMiddleware.cs" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Content Remove="Views\Shared\_List_Nav.cshtml" />
-  </ItemGroup>
-
-  <ItemGroup>
     <Content Include="..\Doc\leaf.png" Link="leaf.png" PackagePath="\" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\Readme.MD">
+    <None Include="..\README.nuget.md">
       <Pack>True</Pack>
       <PackagePath>\</PackagePath>
     </None>
@@ -304,4 +294,5 @@
   <ItemGroup>
     <Folder Include="Enums\" />
   </ItemGroup>
+
 </Project>

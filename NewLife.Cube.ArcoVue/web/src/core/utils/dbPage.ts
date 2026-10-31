@@ -1,4 +1,4 @@
-import { Auth, checkAuth } from '@newlifex/page-utils';
+import { Auth, checkAuth } from '@newlifex/cube';
 
 /** 数据库页动作权限；未配置菜单权限时保持现有页面的开发友好策略。 */
 export function getDbActionPermissions(perms: Record<string, string> | null | undefined) {

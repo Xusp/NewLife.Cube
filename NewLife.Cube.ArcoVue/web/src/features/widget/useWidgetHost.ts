@@ -1,6 +1,6 @@
 import { computed, inject, ref } from 'vue';
 import { Message } from '@arco-design/web-vue';
-import { emptyDashboard, maxWidgetsFor, type WidgetInstance } from '@newlifex/api-core';
+import { emptyDashboard, maxWidgetsFor, type WidgetInstance } from '@newlifex/cube';
 import { isFixedDeveloperChart } from '@/core/utils/chartOptions';
 import { WIDGET_SURFACE_KEY } from './context';
 import { getWidget } from './registry';

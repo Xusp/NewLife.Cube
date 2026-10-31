@@ -12,7 +12,7 @@ using XCode.Membership;
 namespace NewLife.Cube.Areas.Admin.Controllers;
 
 /// <summary>系统设置控制器</summary>
-[DisplayName("魔方设置")]
+[DisplayName("Settings center")]
 [AdminArea]
 [Menu(30, true, Icon = "Tools")]
 public class CubeController : ConfigController<CubeSetting>, IPageDataContext
@@ -44,7 +44,7 @@ public class CubeController : ConfigController<CubeSetting>, IPageDataContext
     /// <summary>
     /// 字段元数据：注入 DefaultRole / ECharts / 登录图上传控件；隐藏 SPA 无用项。
     /// </summary>
-    public override IList<DataField> GetFields(ViewKinds kind)
+    protected override IList<DataField> OnGetFields(ViewKinds kind)
     {
         EnsureCubeSettingFieldSources();
         var list = GetMembers(typeof(CubeSetting))
@@ -58,6 +58,17 @@ public class CubeController : ConfigController<CubeSetting>, IPageDataContext
                 df.DataSourceMap = null;
             df.PrepareForApi();
         }
+
+        // SPA 皮肤字段渲染为下拉，列出当前项目已引用的皮肤包
+        var skinField = list.FirstOrDefault(e => e.Name == nameof(CubeSetting.SpaSkin));
+        if (skinField != null)
+        {
+            skinField.ItemType = "singleSelect";
+            skinField.DataSource = _ => _skinManager.Skins.Values
+                .OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(e => e.Name, e => e.DisplayName);
+        }
+
         return list;
     }
 
@@ -177,6 +188,12 @@ public class CubeController : ConfigController<CubeSetting>, IPageDataContext
         return Json(0, null, new { url, filePath = url, path = url });
     }
 
+    private readonly CubeSkinManager _skinManager;
+
+    /// <summary>实例化</summary>
+    /// <param name="skinManager">前端皮肤管理器</param>
+    public CubeController(CubeSkinManager skinManager) => _skinManager = skinManager;
+
     /// <summary>获取登录设置（附加开关与 StartPage；oauth 始终可见列表，不绑 EnableOAuthServer）</summary>
     [AllowAnonymous]
     [HttpGet]
@@ -184,16 +201,18 @@ public class CubeController : ConfigController<CubeSetting>, IPageDataContext
     {
         var model = new LoginConfigModel();
         var set = CubeSetting.Current;
+        // 品牌字段已迁至 /Cube/Site（SiteConfigModel）；此处按原名下发，兼容既有皮肤与外部客户端
+        var site = new NewLife.Cube.Models.SiteConfigModel(null);
         return Json(0, null, new
         {
             model.Code,
-            model.Name,
-            model.Copyright,
-            model.Registration,
-            model.Logo,
-            model.LoginTip,
-            model.LoginLogo,
-            model.LoginBackground,
+            site.Name,
+            site.Copyright,
+            site.Registration,
+            site.Logo,
+            site.LoginTip,
+            site.LoginBackground,
+            LoginLogo = site.Logo,
             model.Login,
             model.Register,
             model.OAuth,
@@ -228,7 +247,7 @@ public class CubeController : ConfigController<CubeSetting>, IPageDataContext
             });
         }
 
-        var data = new { page = "魔方设置", description = "魔方后台系统配置，可按分类查看各项设置项", fields }.ToJson();
+        var data = new { page = L.T("Cube settings"), description = L.T("Cube backend settings, grouped by category"), fields }.ToJson();
         return Task.FromResult(data);
     }
 }

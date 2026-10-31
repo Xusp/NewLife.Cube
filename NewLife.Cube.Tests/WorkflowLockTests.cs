@@ -77,7 +77,7 @@ public class WorkflowLockTests
         var rec2 = WfLockRecord.FindByKey(rec.Id);
         rec2.Name = "改1";
         var ex = Assert.ThrowsAny<Exception>(() => rec2.Update());
-        Assert.Contains("审批中", ex.GetTrue().Message);
+        Assert.Contains("during approval", ex.GetTrue().Message);
 
         // 流程通道：仅允许节点可写字段 Name → 放行
         var rec3 = WfLockRecord.FindByKey(rec.Id);

@@ -114,6 +114,9 @@ public class ManageProvider2 : ManageProvider
         var context = Context?.HttpContext;
         if (context != null && user != null)
         {
+            // 单设备模式：新登录踢掉旧设备，必须在颁发新令牌之前执行，否则会连带吊销刚签发的会话
+            if (!set.EnableMultiDeviceLogin) UserToken.RevokeByUser(user.ID);
+
             // 先颁发令牌（含 UserToken + JWT(jti)），JWT 缓存在 context.Items
             // 记住登录状态（Remember）：JWT 有效期与 Cookie 一致延长到 365 天，前端重开系统免登录
             var tokenExpire = remember ? TimeSpan.FromDays(365) : TimeSpan.FromSeconds(set.TokenExpire);
@@ -149,9 +152,9 @@ public class ManageProvider2 : ManageProvider
         {
             if (!set.AutoRegister && !oa.AutoRegister)
             {
-                log.WriteLog(typeof(User), "SSO登录", false, $"无法找到[{username}]，且没有打开自动注册", 0, username);
+                log.WriteLog(typeof(User), L.T("SSO sign-in"), false, L.T("User [{0}] was not found and auto-registration is disabled.", username), 0, username);
 
-                throw new XException($"无法找到[{username}]，且没有打开自动注册");
+                throw new XException("User [{0}] was not found and auto-registration is disabled.", username);
             }
 
             user = new User
@@ -174,7 +177,7 @@ public class ManageProvider2 : ManageProvider
         user.LastLogin = DateTime.Now;
         user.Save();
 
-        log.WriteLog(user.GetType(), "OAuth登录", true, $"用户[{user}]使用[{username}]登录[{_client.AppId}]成功！" + Environment.NewLine + ui.ToJson());
+        log.WriteLog(user.GetType(), L.T("OAuth sign-in"), true, L.T("User [{0}] signed in with [{1}] via [{2}].", user, username, _client.AppId) + Environment.NewLine + ui.ToJson());
 
         return user;
     }
@@ -209,10 +212,10 @@ public class ManageProvider2 : ManageProvider
         if (roles != null && roles.Any(e => e.IsSystem))
         {
             pa.Enable = false;
-            pa.Remark = "安全起见，不得代理系统管理员";
+            pa.Remark = L.T("For security reasons, acting on behalf of a system administrator is not allowed");
             pa.Update();
 
-            LogProvider.Provider.WriteLog("用户", "代理", false, $"安全起见，[{pa.AgentName}]不得代理系统管理员[{pa.PrincipalName}]的身份权限", pa.AgentId, pa.AgentName);
+            LogProvider.Provider.WriteLog(L.T("User"), L.T("Agent"), false, L.T("For security reasons, [{0}] must not act on behalf of system administrator [{1}].", pa.AgentName, pa.PrincipalName), pa.AgentId, pa.AgentName);
 
             return user;
         }
@@ -221,8 +224,8 @@ public class ManageProvider2 : ManageProvider
         if (pa.Times == 0) pa.Enable = false;
         pa.Update();
 
-        LogProvider.Provider.WriteLog("用户", "委托", true, $"委托[{pa.AgentName}]使用[{pa.PrincipalName}]的身份权限", pa.PrincipalId, pa.PrincipalName);
-        LogProvider.Provider.WriteLog("用户", "代理", true, $"[{pa.AgentName}]代理使用[{pa.PrincipalName}]的身份权限", pa.AgentId, pa.AgentName);
+        LogProvider.Provider.WriteLog(L.T("User"), L.T("Delegation"), true, L.T("[{0}] is delegated the identity of [{1}].", pa.AgentName, pa.PrincipalName), pa.PrincipalId, pa.PrincipalName);
+        LogProvider.Provider.WriteLog(L.T("User"), L.T("Agent"), true, L.T("[{0}] is acting with the identity of [{1}].", pa.AgentName, pa.PrincipalName), pa.AgentId, pa.AgentName);
 
         return pa.Principal as IManageUser;
     }

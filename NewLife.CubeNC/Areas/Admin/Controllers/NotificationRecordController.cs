@@ -33,7 +33,7 @@ public class NotificationRecordController : ReadOnlyEntityController<Notificatio
         // 行内“标记已读”，仅对当前用户可读的未读站内信显示
         {
             var df = ListFields.AddListField("op", null, "Remark");
-            df.DisplayName = "标记已读";
+            df.DisplayName = "Mark as read";
             df.Url = "/Admin/NotificationRecord/NotifyMarkRead?id={Id}";
             df.DataAction = "action";
             df.DataVisible = e => CanRead(e as NotificationRecord);
@@ -126,9 +126,9 @@ public class NotificationRecordController : ReadOnlyEntityController<Notificatio
     {
         var (userId, admin, name) = GetCurrentUser();
         var entity = NotificationRecord.MarkRead(id, userId, name, admin);
-        if (entity == null) return Json(500, "记录不存在或无权标记已读");
+        if (entity == null) return Json(500, "Record not found or no permission to mark as read");
 
-        return Json(0, "已读", new { entity.Id, entity.Read });
+        return Json(0, "Read", new { entity.Id, entity.Read });
     }
 
     /// <summary>全部标记已读</summary>

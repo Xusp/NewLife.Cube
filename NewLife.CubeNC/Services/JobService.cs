@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Reflection;
 using NewLife.Caching;
 using NewLife.Common;
@@ -15,8 +15,8 @@ namespace NewLife.Cube.Services;
 public static class JobServiceExtersions
 {
     /// <summary>启用魔方CronJob</summary>
-    /// <param name="services"></param>
-    /// <returns></returns>
+    /// <param name="services">服务集合</param>
+    /// <returns>服务集合，便于链式调用</returns>
     public static IServiceCollection AddCubeJob(this IServiceCollection services)
     {
         //// 注册作业服务，这些作业可以使用DI
@@ -42,8 +42,8 @@ public static class JobServiceExtersions
 
 /// <summary>定时作业服务</summary>
 /// <remarks>实例化作业服务</remarks>
-/// <param name="serviceProvider"></param>
-/// <param name="tracer"></param>
+/// <param name="serviceProvider">服务提供者，用于解析作业实例</param>
+/// <param name="tracer">链路追踪器</param>
 public class JobService(IServiceProvider serviceProvider, ITracer tracer) : IHostedService
 {
     #region 核心控制
@@ -51,8 +51,8 @@ public class JobService(IServiceProvider serviceProvider, ITracer tracer) : IHos
     private static TimerX _timer;
 
     /// <summary>启动</summary>
-    /// <param name="cancellationToken"></param>
-    /// <returns></returns>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>启动定时器后完成的异步任务</returns>
     public Task StartAsync(CancellationToken cancellationToken)
     {
         // 定时检测作业参数的变更，如果管理界面修改了作业参数，需要唤醒定时器马上检查
@@ -62,8 +62,8 @@ public class JobService(IServiceProvider serviceProvider, ITracer tracer) : IHos
     }
 
     /// <summary>停止</summary>
-    /// <param name="cancellationToken"></param>
-    /// <returns></returns>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>释放定时器后完成的异步任务</returns>
     public Task StopAsync(CancellationToken cancellationToken)
     {
         _timer.TryDispose();
@@ -79,8 +79,8 @@ public class JobService(IServiceProvider serviceProvider, ITracer tracer) : IHos
     public static void Wake() => _timer.SetNext(1_000);
 
     /// <summary>唤醒具体作业</summary>
-    /// <param name="jobId"></param>
-    /// <param name="ms"></param>
+    /// <param name="jobId">作业编号</param>
+    /// <param name="ms">提前唤醒的延迟毫秒数</param>
     public static void Wake(Int32 jobId, Int32 ms)
     {
         var job = _jobs.FirstOrDefault(e => e.Job.Id == jobId);
@@ -124,7 +124,7 @@ public class JobService(IServiceProvider serviceProvider, ITracer tracer) : IHos
             }
             catch (Exception ex)
             {
-                WriteLog("控制", false, $"作业[{item.Name}/{item.DisplayName}]失败，{ex.Message}", item);
+                WriteLog(L.TLog("Control"), false, L.TLog("Job [{0}/{1}] failed, {2}", item.Name, item.DisplayName, ex.Message), item);
 
                 //item.Enable = false;
                 //item.Update();
@@ -217,7 +217,7 @@ internal class MyJob : IDisposable
         foreach (var item in expession.Split(";"))
         {
             var cron = new Cron();
-            if (!cron.Parse(item)) throw new InvalidOperationException($"无效表达式 {item}");
+            if (!cron.Parse(item)) throw new InvalidOperationException(L.T("Invalid cron expression."));
         }
 
         // 找到类和方法
@@ -225,24 +225,24 @@ internal class MyJob : IDisposable
         if (_type == null || !_type.As<ICubeJob>())
         {
             var p = cmd.LastIndexOf('.');
-            if (p <= 0) throw new InvalidOperationException($"无效作业方法[{cmd}]");
+            if (p <= 0) throw new InvalidOperationException(L.T("Invalid job method [{0}].", cmd));
 
             var typeName = cmd[..p];
             _type = typeName.GetTypeEx();
-            if (_type == null) throw new InvalidOperationException($"无法找到作业类[{typeName}]");
+            if (_type == null) throw new InvalidOperationException(L.T("Job class [{0}] was not found.", typeName));
 
             var methodName = cmd[(p + 1)..];
             _method = _type.GetMethodEx(methodName);
-            if (_method == null) throw new InvalidOperationException($"类[{_type.FullName}]中找不到作业方法[{methodName}]");
+            if (_method == null) throw new InvalidOperationException(L.T("Job method [{0}] was not found in class [{1}].", methodName, _type.FullName));
 
             if (_method.IsStatic)
             {
                 _action = _method.As<Action<String>>();
-                if (_action == null) throw new InvalidOperationException($"无效作业方法[{cmd}]，静态方法无法转为Action<String>委托");
+                if (_action == null) throw new InvalidOperationException(L.T("The job method must be a static method with a single String parameter."));
             }
         }
 
-        JobService.WriteLog("启用", true, $"作业[{job.Name}]，定时 {job.Cron}，方法 {job.Method}", job);
+        JobService.WriteLog(L.TLog("Enable"), true, L.TLog("Job [{0}], cron {1}, method {2}", job.Name, job.Cron, job.Method), job);
 
         // 实例化定时器，原定时器销毁
         _timer.TryDispose();
@@ -260,7 +260,7 @@ internal class MyJob : IDisposable
         {
             //using var span = Tracer?.NewSpan($"job:{Job}:Stop");
 
-            JobService.WriteLog("停用", true, $"作业[{Job.Name}]", Job);
+            JobService.WriteLog(L.TLog("Disable"), true, L.TLog("Job [{0}]", Job.Name), Job);
 
             _timer.TryDispose();
             _timer = null;
@@ -272,8 +272,8 @@ internal class MyJob : IDisposable
     public void Wake(Int32 ms) => _timer?.SetNext(ms);
 
     /// <summary>检查是否正在执行，如果执行则跳过本次处理</summary>
-    /// <param name="job"></param>
-    /// <returns></returns>
+    /// <param name="job">待检查的作业</param>
+    /// <returns>该作业正在执行时返回 true</returns>
     private Boolean CheckRunning(CronJob job)
     {
         // 吃掉所有缓存和数据库异常，避免影响正常业务
@@ -324,7 +324,7 @@ internal class MyJob : IDisposable
         {
             var set = CubeSetting.Current;
             if (set.Debug)
-                JobService.WriteLog(job.Name, false, "分布式锁检查到任务正在处理中，本次跳过执行", job);
+                JobService.WriteLog(job.Name, false, L.TLog("Distributed lock shows the job is still running, skip this round"), job);
             return;
         }
 

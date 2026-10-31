@@ -3,8 +3,9 @@ import { useLocation } from 'react-router-dom';
 import {
   Plus, Trash2, Download, Upload, Search, RefreshCw, Eye, Pencil, ChevronDown,
 } from 'lucide-react';
-import { Auth } from '@newlifex/api-core';
-import { resolveWidgets, type FieldMapping } from '@newlifex/field-mapping';
+import { Auth } from '@newlifex/cube';
+import { resolveWidgets, resolveColumnWidth, resolveColumnAlign, type FieldMapping } from '@newlifex/cube';
+import { normalizeChartList, toggleListView, validateRequiredFields } from '@newlifex/cube';
 import * as echarts from 'echarts';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -58,12 +59,14 @@ export default function DynamicPage() {
 
   // ECharts
   const [chartList, setChartList] = useState<any[]>([]);
+  const [viewMode, setViewMode] = useState<'table' | 'chart'>('table');
   const chartRefs = useRef<(HTMLDivElement | null)[]>([]);
   const chartInstances = useRef<any[]>([]);
 
   const [formOpen, setFormOpen] = useState(false);
   const [isEdit, setIsEdit] = useState(false);
   const [editForm, setEditForm] = useState<Record<string, any>>({});
+  const [formError, setFormError] = useState('');
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailData, setDetailData] = useState<Record<string, any>>({});
 
@@ -103,7 +106,7 @@ export default function DynamicPage() {
   const loadChartData = useCallback(async () => {
     try {
       const res = await api.page.getChartData(type);
-      setChartList(Array.isArray(res.data) && res.data.length > 0 ? res.data : []);
+      setChartList(normalizeChartList(res.data));
     } catch {
       setChartList([]);
     }
@@ -112,6 +115,8 @@ export default function DynamicPage() {
   useEffect(() => { loadChartData(); }, [type]);
 
   useEffect(() => {
+    if (viewMode !== 'chart') return;
+
     chartList.forEach((opt, idx) => {
       const el = chartRefs.current[idx];
       if (!el) return;
@@ -130,7 +135,7 @@ export default function DynamicPage() {
       for (const inst of chartInstances.current) { inst?.dispose(); }
       chartInstances.current = [];
     };
-  }, [chartList]);
+  }, [chartList, viewMode]);
 
   // 选择
   const toggleSelect = (id: string | number) => {
@@ -146,11 +151,12 @@ export default function DynamicPage() {
   };
 
   // CRUD
-  const showAdd = () => { setIsEdit(false); setEditForm({}); setFormOpen(true); };
+  const showAdd = () => { setIsEdit(false); setEditForm({}); setFormError(''); setFormOpen(true); };
   const showEdit = async (row: Record<string, any>) => {
     const res = await api.page.getDetail(type, row[pkField]);
     setIsEdit(true);
     setEditForm({ ...(res.data as any) });
+    setFormError('');
     setFormOpen(true);
   };
   const showDetail = async (row: Record<string, any>) => {
@@ -159,6 +165,12 @@ export default function DynamicPage() {
     setDetailOpen(true);
   };
   const handleSubmit = async () => {
+    const invalid = validateRequiredFields(formFields, editForm);
+    if (invalid.length) {
+      setFormError(invalid.map((e) => e.message).join('；'));
+      return;
+    }
+    setFormError('');
     if (isEdit) await api.page.update(type, editForm);
     else await api.page.add(type, editForm);
     setFormOpen(false);
@@ -180,13 +192,16 @@ export default function DynamicPage() {
 
   return (
     <div className="space-y-4">
-      {/* ECharts 图表区域 */}
-      {chartList.length > 0 && (
+      {/* ECharts 图表区域（图表视图） */}
+      {viewMode === 'chart' && chartList.length > 0 && (
         <div className="rounded-lg border bg-card p-4">
           {chartList.map((_, idx) => (
             <div key={idx} ref={(el) => { chartRefs.current[idx] = el; }} style={{ width: '100%', height: 400 }} />
           ))}
         </div>
+      )}
+      {viewMode === 'chart' && chartList.length === 0 && (
+        <p className="py-12 text-center text-sm text-muted-foreground">暂无图表</p>
       )}
 
       {/* 搜索栏 */}
@@ -235,11 +250,14 @@ export default function DynamicPage() {
           </Button>
         )}
         <div className="flex-1" />
+        <Button variant="outline" size="sm" onClick={() => setViewMode(toggleListView(viewMode))}>
+          {viewMode === 'table' ? '图表' : '表格'}
+        </Button>
         <Button variant="ghost" size="icon" onClick={() => loadData()}><RefreshCw className="h-4 w-4" /></Button>
       </div>
 
       {/* 数据表格 */}
-      <div className="rounded-md border">
+      <div className="rounded-md border overflow-x-auto" style={{ display: viewMode === 'table' ? 'block' : 'none' }}>
         <Table>
           <TableHeader>
             <TableRow>
@@ -247,7 +265,16 @@ export default function DynamicPage() {
                 <Checkbox checked={data.length > 0 && selected.size === data.length} onCheckedChange={toggleSelectAll} />
               </TableHead>
               {listFields.map((f) => (
-                <TableHead key={f.field.name}>{f.field.displayName ?? f.field.name}</TableHead>
+                <TableHead
+                  key={f.field.name}
+                  style={{
+                    width: resolveColumnWidth(f.field),
+                    minWidth: resolveColumnWidth(f.field),
+                    textAlign: resolveColumnAlign(f.field),
+                  }}
+                >
+                  {f.field.displayName ?? f.field.name}
+                </TableHead>
               ))}
               <TableHead className="text-right">操作</TableHead>
             </TableRow>
@@ -261,7 +288,16 @@ export default function DynamicPage() {
                     <Checkbox checked={selected.has(id)} onCheckedChange={() => toggleSelect(id)} />
                   </TableCell>
                   {listFields.map((f) => (
-                    <TableCell key={f.field.name}>{renderCell(row, f)}</TableCell>
+                    <TableCell
+                      key={f.field.name}
+                      style={{
+                        width: resolveColumnWidth(f.field),
+                        minWidth: resolveColumnWidth(f.field),
+                        textAlign: resolveColumnAlign(f.field),
+                      }}
+                    >
+                      {renderCell(row, f)}
+                    </TableCell>
                   ))}
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
@@ -323,6 +359,9 @@ export default function DynamicPage() {
             <DialogTitle>{isEdit ? '编辑' : '新增'}</DialogTitle>
             <DialogDescription>{isEdit ? '修改记录信息' : '填写新记录信息'}</DialogDescription>
           </DialogHeader>
+          {formError ? (
+            <div role="alert" className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">{formError}</div>
+          ) : null}
           <div className="space-y-4 py-2">
             {formFields.map((f) => (
               <FieldInput key={f.field.name} mapping={f} value={editForm[f.field.name] ?? ''} onChange={(v) => setEditForm((prev) => ({ ...prev, [f.field.name]: v }))} />

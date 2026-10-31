@@ -8,7 +8,7 @@ import {
   serializeDashboardJson,
   type DashboardConfig,
   type NamedWorkbenchItem,
-} from '@newlifex/api-core';
+} from '@newlifex/cube';
 import cubeApi from '@/api';
 import { useUserStore } from '@/stores/user';
 import { WIDGET_SURFACE_KEY, type WidgetSurfaceContext } from '@/features/widget/context';

@@ -4,8 +4,10 @@ using Microsoft.Net.Http.Headers;
 using NewLife.Common;
 using NewLife.Cube.Entity;
 using NewLife.Cube.Extensions;
+using NewLife.Cube.Models;
 using NewLife.Log;
 using NewLife.Model;
+using NewLife.Remoting;
 using NewLife.Web;
 using XCode.Membership;
 using HttpContext = Microsoft.AspNetCore.Http.HttpContext;
@@ -19,7 +21,7 @@ namespace NewLife.Cube;
 public static class ManagerProviderHelper
 {
     /// <summary>登录失败统一文案。与 UserService.LoginByPassword 的用户名校验失败文案保持一致，避免泄露用户/租户存在性</summary>
-    private const String LoginFailedMessage = "提供的用户名或密码不正确。";
+    private static String LoginFailedMessage => L.T("Incorrect username or password!");
 
     /// <summary>租户校验失败标记（HttpContext.Items 键）。标识"已认证但租户不匹配"（授权失败，应返回 403），
     /// 与"未认证（凭证缺失/无效，应返回 401）"区分，避免客户端把租户拒绝误判为凭证过期而触发无意义的刷新/重登</summary>
@@ -35,8 +37,7 @@ public static class ManagerProviderHelper
     /// <summary>设置当前用户</summary>
     /// <param name="provider">提供者</param>
     /// <param name="context">Http上下文，兼容NetCore</param>
-    public static void SetPrincipal(this IManageProvider provider, IServiceProvider context = null)
-    {
+    public static void SetPrincipal(this IManageProvider provider, IServiceProvider context = null)    {
         var ctx = ModelExtension.GetService<IHttpContextAccessor>(context)?.HttpContext;
         if (ctx == null) return;
 
@@ -82,7 +83,7 @@ public static class ManagerProviderHelper
                     if (shareUt != null && !(shareUt.Url + "").IsNullOrEmpty()
                         && !IsShareRequestAllowed(context, shareUt))
                     {
-                        span?.AppendTag($"分享令牌路径拒绝：{context.Request.Path}");
+                        span?.AppendTag($"Share token rejected for path: {context.Request.Path}");
                         provider.SetCurrent(null, serviceProvider);
                         return null;
                     }
@@ -130,7 +131,7 @@ public static class ManagerProviderHelper
 
                                     provider.SaveCookie(user, expire, context);
 
-                                    XTrace.WriteLine("滑动刷新：用户[{0}]令牌有效期剩余[{1}]秒，已刷新续期至[{2}]秒", user, remaining.TotalSeconds.ToInt(), expire.TotalSeconds.ToInt());
+                                    XTrace.WriteLine(L.TLog("Sliding refresh: user [{0}] token had [{1}]s left, renewed to [{2}]s", user, remaining.TotalSeconds.ToInt(), expire.TotalSeconds.ToInt()));
                                 }
                             }
                         }
@@ -143,7 +144,7 @@ public static class ManagerProviderHelper
                     {
                         mu.SaveLogin(null);
 
-                        LogProvider.Provider.WriteLog("用户", "自动登录", true, $"{user} IssuedAt={jwt.IssuedAt.ToFullString()} Expire={jwt.Expire.ToFullString()}", user.ID, user + "", ip: context.GetUserHost());
+                        LogProvider.Provider.WriteLog(L.TLog("User"), L.TLog("Auto sign-in"), true, $"{user} IssuedAt={jwt.IssuedAt.ToFullString()} Expire={jwt.Expire.ToFullString()}", user.ID, user + "", ip: context.GetUserHost());
                     }
 #endif
                 }
@@ -158,7 +159,7 @@ public static class ManagerProviderHelper
             // 已认证但租户不匹配时 token 本身有效，返回 401 会诱导客户端无意义刷新/重登（死循环），403 语义才正确
             if (!context.ValidateTenant(user))
             {
-                XTrace.WriteLine("租户校验失败，拒绝访问：用户[{0}]没有可用的有效租户", user);
+                XTrace.WriteLine(L.TLog("Tenant check failed, access denied: user [{0}] has no valid tenant", user));
                 context.Items[TenantCheckFailedKey] = user.Name;
                 context.Items[TenantCheckFailedUserIdKey] = user.ID;
                 provider.SetCurrent(null, serviceProvider);
@@ -196,21 +197,21 @@ public static class ManagerProviderHelper
             var shareUser = TryLoadShareUserToken(token, span);
             if (shareUser != null) return (shareUser, null);
 
-            span?.AppendTag($"令牌无效：{msg}");
-            XTrace.WriteLine("令牌无效：{0}, token={1}", msg, token);
+            span?.AppendTag(L.TLog("Invalid token: {0}", msg));
+            XTrace.WriteLine(L.TLog("Invalid token: {0}, token={1}", msg, token));
 
             return (null, jwt);
         }
 
         var user = jwt.Subject;
         if (user.IsNullOrEmpty()) return (null, jwt);
-        span?.AppendTag($"账号：{user}");
+        span?.AppendTag(L.TLog("Account: {0}", user));
 
         // 判断有效期
         if (jwt.Expire < DateTime.Now)
         {
-            span?.AppendTag($"令牌过期：{jwt.Expire.ToFullString()}");
-            XTrace.WriteLine("令牌过期：{0} {1}", jwt.Expire, token);
+            span?.AppendTag(L.TLog("Token expired: {0}", jwt.Expire.ToFullString()));
+            XTrace.WriteLine(L.TLog("Token expired: {0} {1}", jwt.Expire, token));
 
             return (null, jwt);
         }
@@ -219,7 +220,7 @@ public static class ManagerProviderHelper
         if (jwt.Id.IsNullOrEmpty())
         {
             // 旧令牌可能不含 jti，写日志辅助排查，但仍放行（灰度期）
-            span?.AppendTag("令牌缺少 jti（可能是旧令牌，建议重新登录）");
+            span?.AppendTag(L.TLog("Token is missing jti (possibly an old token, please sign in again)"));
         }
         else
         {
@@ -229,8 +230,8 @@ public static class ManagerProviderHelper
                 var ut = UserToken.FindByID(utId);
                 if (ut == null || !ut.Enable)
                 {
-                    span?.AppendTag($"UserToken 已吊销：{utId}");
-                    XTrace.WriteLine("UserToken 已吊销：{0}", utId);
+                    span?.AppendTag(L.TLog("UserToken revoked: {0}", utId));
+                    XTrace.WriteLine(L.TLog("UserToken revoked: {0}", utId));
                     return (null, jwt);
                 }
             }
@@ -238,7 +239,7 @@ public static class ManagerProviderHelper
 
         var u = provider.FindByName(user);
         if (u == null || !u.Enable) return (null, jwt);
-        span?.AppendTag($"用户：{u}");
+        span?.AppendTag(L.TLog("User: {0}", u));
 
         return (u, jwt);
     }
@@ -253,7 +254,7 @@ public static class ManagerProviderHelper
         if (ut.Expire.Year > 2000 && ut.Expire < DateTime.Now) return null;
         var user = ut.User as IManageUser;
         if (user == null || !user.Enable) return null;
-        span?.AppendTag($"分享令牌用户：{user}");
+        span?.AppendTag($"Share token user: {user}");
         return user;
     }
 
@@ -380,24 +381,12 @@ public static class ManagerProviderHelper
         var resolution = context.ResolveTenant();
         if (resolution.HasIdentifier || context.HasExplicitTenantHeader())
         {
-            // 显式但解析无效（X-Tenant 不存在/已禁用、X-App-Id 未配置等）→ 拒绝。
-            // 生产路径中 X-Tenant/X-Tenant-Id/Query/Cookie 无效由 DataScopeMiddleware 先以 400 拦截，
+            // 显式但解析无效（X-Tenant 不存在/已禁用、X-App-Id 未配置或未设租户等）→ 拒绝。
+            // 生产路径中 X-Tenant/Query/Cookie 无效由 DataScopeMiddleware 先以 400 拦截，
             // 此处兜底 X-App-Id 未配置等中间件不解析的场景，及绕过中间件的直接调用。
             if (!resolution.IsValid)
             {
-                // [TenantCompat] 影子期：X-App-Id 应用已配置但未设置租户（存量小程序过渡态）→ 兼容放行。
-                // 应用未配置（真无效）或租户已禁用仍拒绝；切 Enforce 并稳定后移除该兼容分支（见评审方案 5.5）。
-                var appId = context.Request.Headers["X-App-Id"].ToString();
-                if (!appId.IsNullOrEmpty() && IsAppIdConfiguredWithoutTenant(appId) && set.TenantEnforceMode == TenantEnforceModes.Shadow)
-                {
-                    context.ChooseTenant(user.ID); // 已绑定回落第一个租户；未绑定不设上下文（防看全量）
-                    XTrace.WriteLine("[TenantCompat] 应用[{0}]已配置但未设置租户，影子期兼容放行：{1} 用户[{2}]", appId, context.Request.Path, user);
-                    // 数据日志（CreateLog 落库，管理后台审计日志可查）
-                    WriteTenantCompatDataLog("影子兼容放行", $"应用[{appId}]已配置但未设置租户，影子期兼容放行 用户[{user}]", user, context.GetUserHost());
-                    return true;
-                }
-
-                XTrace.WriteLine("租户校验失败：显式租户标识无效，拒绝访问：用户[{0}] resolution={1}", user, resolution.TenantId);
+                XTrace.WriteLine(L.TLog("Tenant check failed: explicit tenant id invalid, access denied: user [{0}] resolution={1}", user, resolution.TenantId));
                 context.Items[TenantCheckFailedReasonKey] = "InvalidIdentifier";
                 return false;
             }
@@ -412,7 +401,7 @@ public static class ManagerProviderHelper
             // 普通用户：必须是所带租户的成员（管理后台 tenantId=0 由 IsMember 拒绝，普通用户进不了管理后台）
             if (!TenantAccessPolicy.IsMember(resolution.TenantId, user))
             {
-                XTrace.WriteLine("租户校验失败：用户[{0}]不是租户[{1}]成员，拒绝访问", user, resolution.TenantId);
+                XTrace.WriteLine(L.TLog("Tenant check failed: user [{0}] is not a member of tenant [{1}], access denied", user, resolution.TenantId));
                 context.Items[TenantCheckFailedReasonKey] = "NotMember";
                 return false;
             }
@@ -421,19 +410,7 @@ public static class ManagerProviderHelper
             return true;
         }
 
-        // 无租户标识：
-        // [TenantCompat] 影子期规则A：旧客户端无租户标识时跳过 fail-closed 直接放行，仅记录影子日志。
-        // 已绑定用户仍需 ChooseTenant 回落到第一个绑定租户（方案 5.2），避免看到未过滤数据。
-        // 切 Enforce 并稳定后移除该兼容分支（见评审方案 5.5）
-        if (set.TenantEnforceMode == TenantEnforceModes.Shadow)
-        {
-            context.ChooseTenant(user.ID);
-            XTrace.WriteLine("[TenantCompat] 旧客户端无租户标识，兼容放行：{0} 用户[{1}]", context.Request.Path, user);
-            WriteTenantCompatDataLog("影子兼容放行", $"旧客户端无租户标识，兼容放行 路径[{context.Request.Path}] 用户[{user}]", user, context.GetUserHost());
-            return true;
-        }
-
-        // Enforce + 无租户标识：管理员本身不属任何租户、无需租户标识（直接进管理后台）；
+        // 无租户标识：管理员本身不属任何租户、无需租户标识（直接进管理后台）；
         // 普通用户必须携带租户标识，否则拒绝。
         if (user is IUser au && au.Roles.Any(e => e.IsSystem))
         {
@@ -444,26 +421,6 @@ public static class ManagerProviderHelper
         return false; // 普通用户缺租户标识，拒绝
     }
 
-    /// <summary>记录影子期兼容放行的数据日志（CreateLog 落库，管理后台审计日志可查），与 [TenantCompat] 影子日志配套，供观察期统计存量无租户请求。
-    /// 注：影子日志在观察期为高频路径（每个无标识请求一条），落库会持续产生数据，切 Enforce 或移除兼容分支时应一并评估</summary>
-    /// <param name="scene">场景动作名</param>
-    /// <param name="remark">详情</param>
-    /// <param name="user">当前用户（无租户上下文的中间件/数据层场景可为 null）</param>
-    /// <param name="ip">客户端IP</param>
-    public static void WriteTenantCompatDataLog(String scene, String remark, IManageUser user, String ip)
-    {
-        try
-        {
-            var log = LogProvider.Provider.CreateLog("租户", scene, true, remark, user?.ID ?? 0, user + "", ip);
-            log?.SaveAsync();
-        }
-        catch (Exception ex)
-        {
-            // 影子日志不应影响主流程，落库失败仅记跟踪日志
-            XTrace.WriteLine("影子数据日志写入失败：{0}", ex.Message);
-        }
-    }
-
     /// <summary>是否显式提供了租户信息（请求头/查询参数/Cookie 非空即算，不校验有效性）。用于认证层区分"显式但无效"与"完全无标识"</summary>
     private static Boolean HasExplicitTenantHeader(this HttpContext context)
     {
@@ -471,7 +428,6 @@ public static class ManagerProviderHelper
         if (req == null) return false;
 
         return !req.Headers["X-Tenant"].ToString().IsNullOrEmpty()
-            || !req.Headers["X-Tenant-Id"].ToString().IsNullOrEmpty()
             || !req.Headers["X-App-Id"].ToString().IsNullOrEmpty()
             || !req.Query["tenantId"].ToString().IsNullOrEmpty()
             || !req.Cookies[$"TenantId-{SysConfig.Current.Name}"].IsNullOrEmpty();
@@ -483,16 +439,6 @@ public static class ManagerProviderHelper
         if (appId.IsNullOrEmpty()) return -1;
         var config = OAuthConfig.FindByAppId(appId);
         return config != null && IsValidTenant(config.TenantId) ? config.TenantId : -1;
-    }
-
-    /// <summary>X-App-Id 对应的应用（OAuthConfig）已配置但未设置租户（TenantId&lt;=0）。存量小程序过渡态，供影子期兼容放行判断。应用未配置返回 false</summary>
-    /// <param name="appId">应用标识</param>
-    /// <returns>应用存在且租户未设置返回 true</returns>
-    private static Boolean IsAppIdConfiguredWithoutTenant(String appId)
-    {
-        if (appId.IsNullOrEmpty()) return false;
-        var config = OAuthConfig.FindByAppId(appId);
-        return config != null && config.TenantId <= 0;
     }
 
     /// <summary>单一租户解析入口：优先 X-App-Id（OAuth 配置租户），其次 X-Tenant/Query/Cookie，返回结构化结果</summary>
@@ -598,7 +544,7 @@ public static class ManagerProviderHelper
     }
 
     /// <summary>解析注册租户。优先X-App-Id（参考SSO登录按AppId查找OAuth配置取租户），其次X-Tenant（租户编码，与GetTenantId语义一致）。
-    /// Shadow 期（默认）：无租户标识的注册与登录规则A一致，兼容放行不绑定，仅记日志；Enforce 才强制要求有效租户。未开启多租户不解析</summary>
+    /// 多租户开启时注册必须携带有效租户信息，否则返回错误拒绝注册。未开启多租户不解析</summary>
     /// <param name="context">HTTP上下文</param>
     /// <returns>错误信息，null表示成功</returns>
     public static String ResolveRegisterTenant(this HttpContext context)
@@ -619,18 +565,9 @@ public static class ManagerProviderHelper
             if (config == null)
                 return $"应用{nameof(OAuthConfig.AppId)}未配置";
 
-            // 应用已配置但租户未设置（存量小程序过渡态）：与访问路径 ValidateTenant 一致——
-            // Shadow 兼容放行（不设租户上下文，避免误落管理后台）；Enforce 拒绝。切 Enforce 前须为应用设置租户。
+            // 应用已配置但租户未设置：拒绝注册，须先为应用设置租户
             if (config.TenantId <= 0)
-            {
-                if (set.TenantEnforceMode == TenantEnforceModes.Shadow)
-                {
-                    XTrace.WriteLine("[TenantCompat] 应用[{0}]已配置但未设置租户，注册影子期兼容放行：{1}", appId, context.Request.Path);
-                    WriteTenantCompatDataLog("影子兼容放行", $"应用[{appId}]已配置但未设置租户，注册影子期兼容放行 路径[{context.Request.Path}]", null, context.GetUserHost());
-                    return null;
-                }
                 return $"应用[{appId}]未配置租户，无法注册";
-            }
 
             // 校验配置所属租户有效
             var tenant = Tenant.FindById(config.TenantId);
@@ -657,16 +594,7 @@ public static class ManagerProviderHelper
         // 此时租户已由 GetTenantId（Cookie）解析并校验过有效性，直接沿用
         if (TenantContext.Current.GetTenantMode() == TenantMode.Tenant) return null;
 
-        // [TenantCompat] Shadow 期规则A：旧客户端无租户标识注册，与登录一致兼容放行（不绑定），仅记录影子日志。
-        // 切 Enforce 并稳定后移除该兼容分支（见评审方案 5.5）
-        if (set.TenantEnforceMode == TenantEnforceModes.Shadow)
-        {
-            XTrace.WriteLine("[TenantCompat] 旧客户端无租户标识注册，兼容放行：{0}", context.Request.Path);
-            WriteTenantCompatDataLog("影子兼容放行", $"旧客户端无租户标识注册，兼容放行 路径[{context.Request.Path}]", null, context.GetUserHost());
-            return null;
-        }
-
-        // Enforce：注册必须携带租户信息，否则拒绝注册
+        // 注册必须携带租户信息，否则拒绝注册
         return "多租户模式下，注册必须携带X-App-Id或X-Tenant租户信息";
     }
 
@@ -708,7 +636,7 @@ public static class ManagerProviderHelper
 
         // 生成令牌
         var ss = set.JwtSecret?.Split(':');
-        if (ss == null || ss.Length < 2) throw new InvalidOperationException("未设置JWT算法和密钥");
+        if (ss == null || ss.Length < 2) throw new InvalidOperationException(L.T("JWT algorithm and secret are not configured."));
 
         var jwt = new JwtBuilder
         {
@@ -843,25 +771,60 @@ public static class ManagerProviderHelper
 
     // IssueTokenAndRefreshToken 已迁移至 IssueLoginToken，旧名不再保留
 
+    /// <summary>从请求头中获取令牌</summary>
+    /// <param name="context">HTTP 上下文</param>
+    /// <param name="queryToken">查询串中的令牌（已弃用，仅作兼容）</param>
+    /// <returns>解析出的令牌</returns>
+    /// <remarks>
+    /// 优先读取 <c>Authorization: Bearer</c>；仅当头缺失时才回退到查询串，并输出 Warning 头与日志。
+    /// 查询串令牌会进入访问日志、代理日志、Referer 与浏览器历史，OAuth 2.0 Security BCP 明确不建议。
+    /// </remarks>
+    public static String ResolveAccessToken(this HttpContext context, String queryToken)
+    {
+        var header = (context.Request.Headers["Authorization"] + "").TrimPrefix("Bearer ").Trim();
+        if (!header.IsNullOrEmpty()) return header;
+
+        if (!queryToken.IsNullOrEmpty())
+        {
+            context.Response.Headers["Warning"] = "299 - \"access_token in query string is deprecated; use Authorization: Bearer\"";
+            XTrace.WriteLine($"Deprecated access_token in query string: {context.Request.Path}");
+        }
+
+        return queryToken;
+    }
+
     /// <summary>刷新令牌</summary>
-    /// <param name="context"></param>
-    /// <param name="user"></param>
-    /// <param name="refresh_token"></param>
-    /// <returns></returns>
-    /// <exception cref="Exception"></exception>
+    /// <remarks>
+    /// 安全要求：刷新令牌必须属于请求用户本人，且用户处于启用状态、令牌记录未被吊销且未过期。
+    /// 任一条件不满足均视为令牌泄漏或跨账号接管尝试，统一按登出（CubeCode.LogOff）拒绝，不颁发新令牌。
+    /// </remarks>
+    /// <param name="context">HTTP 上下文</param>
+    /// <param name="user">按请求用户名解析出的用户</param>
+    /// <param name="refresh_token">刷新令牌</param>
+    /// <returns>新的访问令牌与刷新令牌</returns>
+    /// <exception cref="ApiException">令牌无效、已吊销、已过期，或与请求用户不匹配</exception>
     public static IToken RefreshToken(this HttpContext context, IManageUser user, String refresh_token)
     {
         var set = CubeSetting.Current;
-        var result = DecodeRefreshToken(refresh_token, out var username, out var expire);
-        if (!result) throw new Exception($"刷新令牌异常：{refresh_token}");
+        var result = DecodeRefreshToken(refresh_token, out var username, out _);
+        if (!result) throw new ApiException(CubeCode.LogOff.ToInt(), L.T("Failed to refresh the token: {0}", refresh_token));
+
+        // 令牌内用户名必须与请求用户一致，防止用自己的刷新令牌 + 他人用户名换取他人访问令牌（账号接管）。
+        // 不区分具体原因，统一使用同一文案，避免泄露账号/令牌状态
+        if (user == null || !user.Name.EqualIgnoreCase(username))
+            throw new ApiException(CubeCode.LogOff.ToInt(), L.T("refresh_token has expired; please sign in again."));
+
+        // 用户必须启用
+        if (!user.Enable) throw new ApiException(CubeCode.LogOff.ToInt(), L.T("User is disabled."));
+
+        // 刷新令牌必须仍然有效：存在、未吊销、未过期，否则视为重放
+        var oldUt = UserToken.FindByToken(refresh_token);
+        if (oldUt == null || !oldUt.Enable || oldUt.Expire <= DateTime.Now)
+            throw new ApiException(CubeCode.LogOff.ToInt(), L.T("refresh_token has expired; please sign in again."));
 
         // 吊销旧令牌，实现令牌旋转
-        var oldUt = UserToken.FindByToken(refresh_token);
-        if (oldUt != null)
-        {
-            oldUt.Enable = false;
-            oldUt.Update();
-        }
+        oldUt.Enable = false;
+        oldUt.Update();
 
         return context.IssueLoginToken(user, TimeSpan.FromSeconds(set.TokenExpire));
     }
@@ -908,7 +871,7 @@ public static class ManagerProviderHelper
                 var ut = UserToken.FindByID(utId);
                 if (ut == null || !ut.Enable)
                 {
-                    XTrace.WriteLine("UserToken 已吊销：{0}", utId);
+                    XTrace.WriteLine(L.TLog("UserToken revoked: {0}", utId));
                     return null;
                 }
             }
@@ -916,7 +879,7 @@ public static class ManagerProviderHelper
 
         // 设置登录用户
         var user = manageProvider.FindByName(username);
-        if (user == null) XTrace.WriteLine($"未查询到相关用户{username}");
+        if (user == null) XTrace.WriteLine(L.TLog("User not found: {0}", username));
 
         return user;
     }
@@ -950,7 +913,7 @@ public static class ManagerProviderHelper
 
             if (!jwt.TryDecode(token, out var msg))
             {
-                XTrace.WriteLine("令牌无效：{0}, token={1}", msg, token);
+                XTrace.WriteLine(L.TLog("Invalid token: {0}, token={1}", msg, token));
                 throw new Exception(msg);
             }
 
@@ -969,8 +932,8 @@ public static class ManagerProviderHelper
         }
 
         jwt = null;
-        XTrace.WriteLine("令牌格式错误：{0}", token);
-        throw new Exception("非法访问令牌");
+        XTrace.WriteLine(L.TLog("Malformed token: {0}", token));
+        throw new Exception(L.T("Invalid access token."));
     }
 
     /// <summary>保存用户信息到Cookie</summary>
@@ -1065,17 +1028,12 @@ public static class ManagerProviderHelper
         var req = context?.Request;
         if (req == null) return -1;
 
-        // Header优先，兼容前后端分离/小程序等不稳定Cookie场景。
-        // X-Tenant 传租户编码（Code），X-Tenant-Id 传数字ID（已废弃兼容）
+        // Header优先，兼容前后端分离/小程序等不稳定Cookie场景。X-Tenant 传租户编码（Code）
         var tenant = req.Headers["X-Tenant"].ToString();
         if (!tenant.IsNullOrEmpty()) return ResolveTenantByCode(tenant);
 
-        // [已过期] X-Tenant-Id头已被X-Tenant租户编码替代，仅保留兼容读取，新客户端请改用X-Tenant
-        var idStr = req.Headers["X-Tenant-Id"].ToString();
-        if (!idStr.IsNullOrEmpty()) return ResolveTenantById(idStr);
-
         // QueryString兜底（一般用于调试/回调等），传数字ID
-        idStr = req.Query["tenantId"].ToString();
+        var idStr = req.Query["tenantId"].ToString();
         if (!idStr.IsNullOrEmpty()) return ResolveTenantById(idStr);
 
         // 最后从Cookie读取（兼容现有浏览器模式），Cookie存的是数字ID
@@ -1099,19 +1057,11 @@ public static class ManagerProviderHelper
         var set = CubeSetting.Current;
         if (!set.EnableTenant) return null;
 
-        // 统一走单一解析入口（X-App-Id → X-Tenant/X-Tenant-Id/Query/Cookie），与自动绑定/访问路径的租户解析语义一致
+        // 统一走单一解析入口（X-App-Id → X-Tenant/Query/Cookie），与自动绑定/访问路径的租户解析语义一致
         var resolution = context.ResolveTenant();
 
-        // 未解析到有效租户：完全未声明不校验；显式声明但无效（不存在/已禁用）当作用户不存在，拒绝登录
-        if (resolution.TenantId <= 0)
-        {
-            // X-App-Id 对应应用已配置但未设置租户（存量小程序过渡态）：视为未声明，与注册路径影子期兼容放行一致
-            var appId = req.Headers["X-App-Id"] + "";
-            if (IsAppIdConfiguredWithoutTenant(appId))
-                return null;
-
-            return context.HasExplicitTenantHeader() ? LoginFailedMessage : null;
-        }
+        // 未解析到有效租户：完全未声明不校验；显式声明但无效（不存在/已禁用/应用未设租户）当作用户不存在，拒绝登录
+        if (resolution.TenantId <= 0) return context.HasExplicitTenantHeader() ? LoginFailedMessage : null;
 
         var tenantId = resolution.TenantId;
 
@@ -1142,7 +1092,7 @@ public static class ManagerProviderHelper
         return t.Id;
     }
 
-    /// <summary>按数字ID解析租户。X-Tenant-Id/Query/Cookie 专用；0表示管理后台；多租户开启时校验存在且启用，无效返回-1</summary>
+    /// <summary>按数字ID解析租户。Query/Cookie 专用；0表示管理后台；多租户开启时校验存在且启用，无效返回-1</summary>
     /// <param name="idStr">租户数字ID</param>
     /// <returns>租户ID，无效返回-1；0表示管理后台</returns>
     private static Int32 ResolveTenantById(String idStr)
@@ -1180,7 +1130,7 @@ public static class ManagerProviderHelper
     /// <param name="app"></param>
     public static void UseManagerProvider(this IApplicationBuilder app)
     {
-        XTrace.WriteLine("初始化ManageProvider");
+        XTrace.WriteLine(L.TLog("Initialize ManageProvider"));
 
         var provider = app.ApplicationServices;
         ManageProvider.Provider = ModelExtension.GetService<IManageProvider>(provider);
@@ -1206,16 +1156,6 @@ public enum TenantMode
 
     /// <summary>租户模式（TenantId&gt;0）</summary>
     Tenant = 2,
-}
-
-/// <summary>多租户强制模式</summary>
-public enum TenantEnforceModes
-{
-    /// <summary>兼容观察期：旧客户端无租户标识时放行并记录影子日志（过渡期使用，后期移除）</summary>
-    Shadow = 0,
-
-    /// <summary>严格执行：fail-closed，无租户标识一律拒绝（最终稳定态）</summary>
-    Enforce = 1,
 }
 
 /// <summary>多租户查询策略</summary>

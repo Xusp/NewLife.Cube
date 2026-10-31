@@ -53,6 +53,8 @@ export interface UserInfo {
   updateTime: string;
   remark: string;
   permission: string;
+  /** 是否系统管理员（后端 /Auth/Info 可能返回） */
+  isSystemAdmin?: boolean;
 }
 
 const state: {
@@ -101,7 +103,7 @@ export const useUserStore = defineStore('user', {
           await request(axiosConfig);
         }
       } catch (error) {
-        console.error('登出接口调用失败:', error);
+        console.error('Failed to call the logout API:', error);
       } finally {
         // 无论接口调用成功与否，都执行本地清理操作
 

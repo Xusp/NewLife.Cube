@@ -1,4 +1,4 @@
-import { FieldKind } from '@newlifex/api-core';
+import { FieldKind } from '@newlifex/cube';
 import type { FieldMeta } from '@/core/types/field';
 import { toFieldMetas } from '@/core/utils/fieldNormalize';
 import { enrichFieldsWithEnumDataSource, enrichFieldsWithLookup } from '@/core/utils/lov-api';

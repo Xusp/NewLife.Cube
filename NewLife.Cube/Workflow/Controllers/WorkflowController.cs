@@ -1214,11 +1214,11 @@ public class WorkflowController : ControllerBaseX
     #region 辅助
     static void FillDef(WorkflowDefinition def, WorkflowDefModel? model)
     {
-        if (model == null) throw new WorkflowException(400, "请求数据为空");
+        if (model == null) throw new WorkflowException(400, "Request body is empty");
         var typePath = (model.TypePath ?? "").Trim();
-        if (typePath.IsNullOrEmpty()) throw new WorkflowException(400, "实体路径不能为空");
+        if (typePath.IsNullOrEmpty()) throw new WorkflowException(400, "Entity path cannot be empty");
         var name = (model.Name ?? "").Trim();
-        if (name.IsNullOrEmpty()) throw new WorkflowException(400, "名称不能为空");
+        if (name.IsNullOrEmpty()) throw new WorkflowException(400, "Name cannot be empty");
         def.TypePath = AutomationPaths.NormalizeTypePath(typePath);
         def.Name = name;
         def.Enable = model.Enable;

@@ -1,18 +1,27 @@
 <script setup lang="ts">
 /**
  * 自动分页包装：根据后端响应形态在「列表页」与「单对象页」之间分流，
- * 避免对象控制器（ObjectController/ConfigController）因缺少 GetPage 而白屏。
+ * 避免对象控制器（ObjectController/ConfigController）因缺少 meta 而白屏。
  *
  * 判定规则（无 404 探测，两种控制器均返回 200）：
  * - 列表控制器 Index 返回 { data:[...], page:{...} }（无 code 字段）
  * - 对象控制器 Index 返回 { code:0, data:{...} }（带 code 且无 page）
  */
 import { ref, onMounted, computed, defineAsyncComponent } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import request from '@newlifex/cube-vue/core/utils/request';
 import { routeToApiPrefix } from '@newlifex/cube-vue/core/utils/url';
 
+interface Props {
+  /** 页头标题（无菜单匹配时由后端实体显示名给出） */
+  title?: string;
+}
+
+const props = withDefaults(defineProps<Props>(), { title: undefined });
+
 const route = useRoute();
+const { t } = useI18n();
 const apiPrefix = computed(() => routeToApiPrefix(String(route.path)));
 const mode = ref<'pending' | 'list' | 'object'>('pending');
 
@@ -21,7 +30,12 @@ const ObjectView = defineAsyncComponent(() => import('./object.vue'));
 
 onMounted(async () => {
   try {
-    const res: any = await request({ url: apiPrefix.value, method: 'get' });
+    // 放行 4xx：接口型控制器没有列表/表单，探测必然 404，属正常结果，不能弹全局错误提示
+    const res: any = await request({
+      url: apiPrefix.value,
+      method: 'get',
+      validateStatus: () => true,
+    });
     if (res && typeof res === 'object' && 'code' in res && !('page' in res)) {
       mode.value = 'object';
     } else {
@@ -36,9 +50,9 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div v-if="mode === 'pending'" class="autopage-loading">加载中…</div>
-  <IndexView v-else-if="mode === 'list'" />
-  <ObjectView v-else />
+    <div v-if="mode === 'pending'" class="autopage-loading">{{ t('common.loading') }}</div>
+  <IndexView v-else-if="mode === 'list'" :title="props.title" />
+  <ObjectView v-else :title="props.title" />
 </template>
 
 <style lang="scss" scoped>

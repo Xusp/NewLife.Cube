@@ -8,7 +8,7 @@
 import { computed, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import type { FieldMeta } from '@/core/types/field';
-import type { WorkflowTaskItem } from '@newlifex/api-core';
+import type { WorkflowTaskItem } from '@newlifex/cube';
 import type { ViewGroup } from '@/core/utils/viewProfile';
 import {
   dueText,

@@ -3,7 +3,7 @@
  *
  * 权限按钮、列表过滤、ENUM/LIST 配置保存体组装、类型展示文案。
  */
-import { Auth, checkAuth } from '@newlifex/page-utils';
+import { Auth, checkAuth } from '@newlifex/cube';
 
 /** 值集列表行（手工定义） */
 export interface LovRow {

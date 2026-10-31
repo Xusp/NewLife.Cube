@@ -27,7 +27,7 @@ public class FileController : ControllerBaseX
         var root = Root.EnsureEnd(Path.DirectorySeparatorChar + "");
         if (!fi.FullName.StartsWithIgnoreCase(root))
         {
-            WriteLog("Valid", false, $"文件[{fi.FullName}]非法越界！");
+            WriteLog("Valid", false, L.TLog("File [{0}] is outside the allowed path!", fi.FullName));
 
             return null;
         }
@@ -47,7 +47,7 @@ public class FileController : ControllerBaseX
         var root = Root.EnsureEnd(Path.DirectorySeparatorChar + "");
         if (!di.FullName.StartsWithIgnoreCase(root))
         {
-            WriteLog("Valid", false, $"目录[{di.FullName}]非法越界！");
+            WriteLog("Valid", false, L.TLog("Directory [{0}] is outside the allowed path!", di.FullName));
 
             return null;
         }
@@ -185,15 +185,15 @@ public class FileController : ControllerBaseX
         if (fi != null)
         {
             p = GetFullName(fi.Directory.FullName);
-            WriteLog("删除", true, fi.FullName);
+            WriteLog(L.TLog("Delete"), true, fi.FullName);
             fi.Delete();
         }
         else
         {
-            var di = GetDirectory(r) ?? throw new Exception("找不到文件或目录！");
+            var di = GetDirectory(r) ?? throw new Exception("File or directory not found!");
 
             p = GetFullName(di.Parent.FullName);
-            WriteLog("删除", true, di.FullName);
+            WriteLog(L.TLog("Delete"), true, di.FullName);
             di.Delete(true);
         }
 
@@ -216,18 +216,18 @@ public class FileController : ControllerBaseX
             p = GetFullName(fi.Directory.FullName);
             var dst = $"{fi.Name}_{DateTime.Now:yyyyMMddHHmmss}.zip";
             dst = fi.Directory.FullName.CombinePath(dst);
-            WriteLog("压缩", true, $"{fi.FullName} => {dst}");
+            WriteLog(L.TLog("Compress"), true, $"{fi.FullName} => {dst}");
             fi.Compress(dst);
         }
         else
         {
             var di = GetDirectory(r);
-            if (di == null) throw new Exception("找不到文件或目录！");
+            if (di == null) throw new Exception("File or directory not found!");
 
             p = GetFullName(di.Parent.FullName);
             var dst = $"{di.Name}_{DateTime.Now:yyyyMMddHHmmss}.zip";
             dst = di.Parent.FullName.CombinePath(dst);
-            WriteLog("压缩", true, $"{di.FullName} => {dst}");
+            WriteLog(L.TLog("Compress"), true, $"{di.FullName} => {dst}");
             di.Compress(dst);
         }
 
@@ -241,10 +241,10 @@ public class FileController : ControllerBaseX
     public ActionResult Decompress(String r)
     {
         var fi = GetFile(r);
-        if (fi == null) throw new Exception("找不到文件！");
+        if (fi == null) throw new Exception("File not found!");
 
         var p = GetFullName(fi.Directory.FullName);
-        WriteLog("解压缩", true, fi.FullName);
+        WriteLog(L.TLog("Uncompress"), true, fi.FullName);
         fi.Extract(fi.Directory.FullName, true);
 
         return Index(p, null);
@@ -262,15 +262,15 @@ public class FileController : ControllerBaseX
     {
         try
         {
-            if (file == null) throw new Exception("未选择文件！");
+            if (file == null) throw new Exception("No file selected!");
 
             var di = GetDirectory(r) ?? Root.AsDirectory();
-            if (di == null) throw new Exception("找不到目录！");
+            if (di == null) throw new Exception("Directory not found!");
 
             // 防目录穿越：仅取文件名，丢弃客户端可控的路径部分
             var name = Path.GetFileName(file.FileName);
             var dest = di.FullName.CombinePath(name);
-            WriteLog("上传", true, dest);
+            WriteLog(L.TLog("Upload"), true, dest);
 
             dest.EnsureDirectory(true);
             //System.IO.File.WriteAllBytes(dest, file.OpenReadStream().ReadBytes(-1));
@@ -305,24 +305,24 @@ public class FileController : ControllerBaseX
             if (file != null)
             {
                 var di = GetDirectory(r) ?? Root.AsDirectory();
-                if (di == null) throw new Exception("找不到目录！");
+                if (di == null) throw new Exception("Directory not found!");
 
                 // 防目录穿越：仅取文件名，丢弃客户端可控的路径部分
                 var name = Path.GetFileName(file.FileName);
                 var dest = di.FullName.CombinePath(name);
-                WriteLog("上传", true, dest);
+                WriteLog(L.TLog("Upload"), true, dest);
 
                 dest.EnsureDirectory(true);
                 //System.IO.File.WriteAllBytes(dest, file.OpenReadStream().ReadBytes(-1));
                 using var fs = new FileStream(dest, FileMode.OpenOrCreate, FileAccess.ReadWrite);
                 await file.CopyToAsync(fs);
             }
-            return Json(new { code = 0, message = "上传成功" });
+            return Json(new { code = 0, message = "Uploaded" });
         }
         catch (Exception ex)
         {
-            WriteLog("上传失败", false, ex + "");
-            return Json(new { code = 500, message = "上传失败" });
+            WriteLog(L.TLog("Upload failed"), false, ex + "");
+            return Json(new { code = 500, message = "Upload failed" });
         }
     }
 
@@ -333,9 +333,9 @@ public class FileController : ControllerBaseX
     public ActionResult Download(String r)
     {
         var fi = GetFile(r);
-        if (fi == null) throw new Exception("找不到文件！");
+        if (fi == null) throw new Exception("File not found!");
 
-        WriteLog("下载", true, fi.FullName);
+        WriteLog(L.TLog("Download"), true, fi.FullName);
 
         return PhysicalFile(fi.FullName, "application/octet-stream", fi.Name, true);
     }
@@ -359,7 +359,7 @@ public class FileController : ControllerBaseX
     public ActionResult Copy(String r, String f)
     {
         var fi = GetItem(f);
-        if (fi == null) throw new Exception("找不到文件或目录！");
+        if (fi == null) throw new Exception("File or directory not found!");
 
         var list = GetClip();
         if (!list.Any(e => e.Raw == fi.Raw)) list.Add(fi);
@@ -376,7 +376,7 @@ public class FileController : ControllerBaseX
     public ActionResult CancelCopy(String r, String f)
     {
         var fi = GetItem(f);
-        if (fi == null) throw new Exception("找不到文件或目录！");
+        if (fi == null) throw new Exception("File or directory not found!");
 
         var list = GetClip();
         list.RemoveAll(e => e.Raw == fi.Raw);
@@ -392,13 +392,13 @@ public class FileController : ControllerBaseX
     public ActionResult Paste(String r)
     {
         var di = GetDirectory(r) ?? Root.AsDirectory();
-        if (di == null) throw new Exception("找不到目录！");
+        if (di == null) throw new Exception("Directory not found!");
 
         var list = GetClip();
         foreach (var item in list)
         {
             var dst = di.FullName.CombinePath(item.Name);
-            WriteLog("复制", true, $"{item.Raw} => {dst}");
+            WriteLog(L.TLog("Copy"), true, $"{item.Raw} => {dst}");
             if (item.Directory)
                 item.Raw.AsDirectory().CopyTo(dst);
             else
@@ -416,13 +416,13 @@ public class FileController : ControllerBaseX
     public ActionResult Move(String r)
     {
         var di = GetDirectory(r) ?? Root.AsDirectory();
-        if (di == null) throw new Exception("找不到目录！");
+        if (di == null) throw new Exception("Directory not found!");
 
         var list = GetClip();
         foreach (var item in list)
         {
             var dst = di.FullName.CombinePath(item.Name);
-            WriteLog("移动", true, $"{item.Raw} => {dst}");
+            WriteLog(L.TLog("Move"), true, $"{item.Raw} => {dst}");
             if (item.Directory)
                 Directory.Move(item.Raw, dst);
             else

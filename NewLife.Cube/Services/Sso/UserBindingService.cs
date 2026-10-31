@@ -112,7 +112,7 @@ public class UserBindingService : IUserBindingService
             var cfg = OAuthConfig.FindByName(client.Name);
             if (user == null && !set.AutoRegister && !cfg.AutoRegister)
             {
-                log?.WriteLog(typeof(User), "SSO登录", false, $"无法找到[{client.Name}]的[{client.NickName}]在本地的绑定，且没有打开自动注册，准备进入登录页面，利用其它登录方式后再绑定", 0, user + "");
+                log?.WriteLog(typeof(User), L.T("SSO sign-in"), false, L.T("No local binding was found for [{0}] of [{1}], and auto-registration is disabled. Redirecting to the sign-in page to bind after signing in with another method.", client.NickName, client.Name), 0, user + "");
 
                 return null;
             }
@@ -204,7 +204,7 @@ public class UserBindingService : IUserBindingService
         uc.Enable = true;
 
         // 写日志
-        log?.WriteLog(typeof(User), "绑定", true, $"[{user}]依据[{mode}]绑定到[{client.Name}]的[{client.NickName}]", user.ID, user + "");
+        log?.WriteLog(typeof(User), L.T("Bind"), true, L.T("[{0}] bound to [{1}] of [{2}] via [{3}].", user, client.NickName, client.Name, mode), user.ID, user + "");
 
         return user;
     }
@@ -237,7 +237,7 @@ public class UserBindingService : IUserBindingService
         log.UserId = user.ID;
         log.SaveAsync();
 
-        LogProvider.Provider?.WriteLog(typeof(User), "绑定", true, $"[{user}]依据[{mode}]绑定到[{uc.Provider}]的[{uc.NickName}]", user.ID, user + "");
+        LogProvider.Provider?.WriteLog(typeof(User), L.T("Bind"), true, L.T("[{0}] bound to [{1}] of [{2}] via [{3}].", user, uc.NickName, uc.Provider, mode), user.ID, user + "");
 
         return log;
     }
@@ -326,12 +326,12 @@ public class UserBindingService : IUserBindingService
         if (existPath.IsNullOrEmpty())
         {
             needUpdate = true;
-            LogProvider.Provider?.WriteLog(user.GetType(), "更新头像", true, $"本地文件不存在 {avatarUrl}", user.ID, user + "");
+            LogProvider.Provider?.WriteLog(user.GetType(), L.T("Update avatar"), true, L.T("Local file does not exist: {0}", avatarUrl), user.ID, user + "");
         }
         else if (!remoteHash.IsNullOrEmpty() && !existPath.AsFile().VerifyHash(remoteHash))
         {
             needUpdate = true;
-            LogProvider.Provider?.WriteLog(user.GetType(), "更新头像", true, $"哈希不匹配 {avatarUrl}", user.ID, user + "");
+            LogProvider.Provider?.WriteLog(user.GetType(), L.T("Update avatar"), true, L.T("Hash mismatch: {0}", avatarUrl), user.ID, user + "");
         }
         else if (!user2.Avatar.IsNullOrEmpty() && user2.Avatar.StartsWithIgnoreCase("https://", "http://"))
         {
@@ -502,87 +502,13 @@ public class UserBindingService : IUserBindingService
         user.DepartmentID = dep.ID;
     }
 
-    /// <summary>填充租户信息</summary>
+    /// <summary>填充租户信息。多租户模式下租户归属走显式管理动作（邀请/后台分配），不再按 SSO 客户端携带的租户标识自动建绑定。
+    /// 保留为空实现作为扩展点：下游如需自动绑定语义，可覆写本方法自行实现并承担相应安全评估</summary>
+    /// <param name="client">SSO 客户端配置，含客户端携带的租户标识</param>
+    /// <param name="user">本地用户</param>
+    /// <param name="manageUser">当前登录用户</param>
     protected virtual void FillTenant(OAuthClient client, User user, IManageUser manageUser)
     {
-        // 未开启多租户时跳过，避免自动创建租户关系导致 ChooseTenant 切入租户模式
-        if (!CubeSetting.Current.EnableTenant) return;
-
-        // 仅影子模式（兼容观察期）才自动按所带租户标识绑定租户；
-        // 非影子（Enforce 严格执行）不自动建绑定，租户归属走显式管理动作（邀请/后台分配）
-        if (CubeSetting.Current.TenantEnforceMode != TenantEnforceModes.Shadow) return;
-
-        var log = LogProvider.Provider;
-
-        if (!client.TenantCode.IsNullOrEmpty() && !client.TenantName.IsNullOrEmpty())
-        {
-            var tenant = Tenant.FindByCode(client.TenantCode);
-            tenant ??= new XCode.Membership.Tenant
-            {
-                Code = client.TenantCode,
-                Name = client.TenantName,
-                Enable = true,
-            };
-            tenant.Save();
-
-            var tenantUser = TenantUser.FindByTenantIdAndUserId(tenant.Id, user.ID);
-            if (tenantUser == null)
-            {
-                tenantUser = new XCode.Membership.TenantUser
-                {
-                    TenantId = tenant.Id,
-                    UserId = user.ID,
-                    //SSO 自动建租户关系时 RoleId 默认为 0，取默认角色兜底
-                    RoleId = ManagerProviderHelper.ResolveTenantRole(tenant.Id),
-                    Enable = true,
-                };
-                tenantUser.Insert();
-
-                log?.WriteLog(typeof(User), "SSO租户", true, $"[{manageUser}]自动创建租户关系[{tenant.Name}]", manageUser.ID, manageUser + "");
-            }
-            else
-            {
-                // 为了补偿存量用户的租户用户角色，始终启用租户用户并确保角色存在
-
-                tenantUser.Enable = true;
-                // 补偿：存量绑定无角色（主角色与角色组均为空）时，用租户默认角色兜底
-                if (tenantUser.RoleId <= 0 && tenantUser.RoleIds.IsNullOrEmpty()) tenantUser.RoleId = ManagerProviderHelper.ResolveTenantRole(tenant.Id);
-                tenantUser.Update();
-
-                log?.WriteLog(typeof(User), "SSO租户", true, $"[{manageUser}]启用租户关系[{tenant.Name}]", manageUser.ID, manageUser + "");
-            }
-        }
-        else if (client.TenantId > 0)
-        {
-            var tenant = Tenant.FindById(client.TenantId);
-            if (tenant != null)
-            {
-                var tenantUser = TenantUser.FindByTenantIdAndUserId(tenant.Id, user.ID);
-                if (tenantUser == null)
-                {
-                    tenantUser = new XCode.Membership.TenantUser
-                    {
-                        TenantId = tenant.Id,
-                        UserId = user.ID,
-                        // 补 RoleId，避免租户内空角色导致 403（SSO 自动建租户关系时 RoleId 默认为 0，取默认角色兜底）
-                        RoleId = ManagerProviderHelper.ResolveTenantRole(tenant.Id),
-                        Enable = true,
-                    };
-                    tenantUser.Insert();
-
-                    log?.WriteLog(typeof(User), "SSO租户", true, $"[{manageUser}]自动创建租户关系[{tenant.Name}]", manageUser.ID, manageUser + "");
-                }
-                else if (!tenantUser.Enable || tenantUser.RoleId == 0)
-                {
-                    tenantUser.Enable = true;
-                    // 补偿：存量绑定无角色（主角色与角色组均为空）时，用租户默认角色兜底
-                    if (tenantUser.RoleId <= 0 && tenantUser.RoleIds.IsNullOrEmpty()) tenantUser.RoleId = ManagerProviderHelper.ResolveTenantRole(tenant.Id);
-                    tenantUser.Update();
-
-                    log?.WriteLog(typeof(User), "SSO租户", true, $"[{manageUser}]启用租户关系[{tenant.Name}]", manageUser.ID, manageUser + "");
-                }
-            }
-        }
     }
     #endregion
 
@@ -670,7 +596,7 @@ public class UserBindingService : IUserBindingService
             {
                 dest = set.AvatarPath.CombinePath(user.ID + ".png").GetBasePath();
 
-                LogProvider.Provider?.WriteLog(user.GetType(), "抓取头像", true, $"{downloadUrl} => {dest} (hash={expectedHash})", user.ID, user + "");
+                LogProvider.Provider?.WriteLog(user.GetType(), L.T("Fetch avatar"), true, $"{downloadUrl} => {dest} (hash={expectedHash})", user.ID, user + "");
 
                 var client = new HttpClient();
 
@@ -707,14 +633,14 @@ public class UserBindingService : IUserBindingService
         {
             span?.SetError(ex, null);
 
-            XTrace.WriteLine("抓取头像失败，{0}, {1}", user, downloadUrl);
+            XTrace.WriteLine("Failed to fetch avatar for {0}: {1}", user, downloadUrl);
             XTrace.WriteException(ex);
         }
 
         // 内网下载失败时，尝试外网地址降级
         if (!fallbackUrl.IsNullOrEmpty() && !url.IsNullOrEmpty() && fallbackUrl != url)
         {
-            XTrace.WriteLine("内网头像下载失败，降级使用外网地址 {0}", fallbackUrl);
+            XTrace.WriteLine("Intranet avatar download failed; falling back to the external URL {0}", fallbackUrl);
             return await FetchAvatar(user, fallbackUrl, accessToken);
         }
 
@@ -813,7 +739,7 @@ public class UserBindingService : IUserBindingService
             prv.Update();
             pub.Update();
         }
-        if (key.IsNullOrEmpty()) throw new ArgumentNullException(nameof(SecurityKey), $"无法找到名为[{name}]的密钥");
+        if (key.IsNullOrEmpty()) throw new ArgumentNullException(nameof(SecurityKey), L.T("The key named [{0}] was not found.", name));
 
         return key;
     }

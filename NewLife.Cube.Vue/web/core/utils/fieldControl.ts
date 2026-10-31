@@ -35,17 +35,57 @@ const ITEM_TYPE_TO_CONTROL: Record<string, ControlType> = {
   image: 'image',
   json: 'json',
   html: 'richHtml',
+  richtext: 'richHtml',
   markdown: 'richMarkdown',
   color: 'color',
   icon: 'icon',
   mail: 'email',
+  email: 'email',
   mobile: 'tel',
+  phone: 'tel',
+  fax: 'tel',
+  password: 'password',
   url: 'url',
+  textarea: 'textarea',
+  number: 'inputNumber',
+  avatar: 'image',
+  attachment: 'upload',
+  percent: 'inputNumber',
+  percentage: 'inputNumber',
+  money: 'inputNumber',
+  area: 'area',
+  area1: 'area',
+  area2: 'area',
+  area3: 'area',
+  area4: 'area',
   singleselect: 'lov',
   multipleselect: 'lovMulti',
   lovtable: 'lov',
   lovtablemulti: 'lovMulti',
 };
+
+/** 解析 decimal(p,s) 形式的 ItemType */
+export function parseDecimalItemType(itemType?: string): { precision: number; scale: number } | null {
+  const match = /^decimal\(\s*(\d+)\s*,\s*(\d+)\s*\)$/i.exec((itemType ?? '').trim());
+  return match ? { precision: Number(match[1]), scale: Number(match[2]) } : null;
+}
+
+/** 是否百分比字段 */
+export function isPercentItemType(itemType?: string): boolean {
+  const text = (itemType ?? '').trim().toLowerCase();
+  return text === 'percent' || text === 'percentage';
+}
+
+/** 是否金额字段 */
+export function isMoneyItemType(itemType?: string): boolean {
+  return (itemType ?? '').trim().toLowerCase() === 'money';
+}
+
+/** 地区字段层级。area1~area4 对应省/市/区/街道，未声明默认三级 */
+export function areaLevel(field: FieldMeta): number {
+  const match = /^area([1-4])$/i.exec((field.itemType ?? '').trim());
+  return match ? Number(match[1]) : 3;
+}
 
 /** 解析小写 ItemType */
 function normalizeItemType(field: FieldMeta): string {
@@ -64,6 +104,10 @@ export function resolveControl(field: FieldMeta): ControlType {
   if (itemType && ITEM_TYPE_TO_CONTROL[itemType]) {
     return ITEM_TYPE_TO_CONTROL[itemType];
   }
+  // 带参数的 decimal(p,s) 与 file-zip / image-xxx 等前缀形式
+  if (parseDecimalItemType(itemType)) return 'inputNumber';
+  if (itemType.startsWith('file')) return 'upload';
+  if (itemType.startsWith('image')) return 'image';
 
   const typeName = field.typeName;
 
@@ -112,7 +156,9 @@ export function resolveSearchControl(field: FieldMeta): SearchControlType {
   const itemType = normalizeItemType(field);
 
   // ItemType 优先
-  if (itemType === 'file' || itemType === 'image') return 'fileExists';
+  if (itemType.startsWith('file') || itemType.startsWith('image')) return 'fileExists';
+  if (isPercentItemType(itemType) || isMoneyItemType(itemType) || parseDecimalItemType(itemType)) return 'numberRange';
+  if (itemType === 'area' || itemType === 'area1' || itemType === 'area2' || itemType === 'area3' || itemType === 'area4') return 'area';
   if (itemType === 'singleselect') return 'lov';
   if (itemType === 'multipleselect') return 'lovMulti';
   if (itemType === 'lovtable') return 'lov';
@@ -147,6 +193,10 @@ export function resolveSearchControl(field: FieldMeta): SearchControlType {
 export function resolveListControl(field: FieldMeta): ListControlType {
   const itemType = normalizeItemType(field);
 
+  // 带后缀的附件类型（image-jpg / file-zip 等）与 MVC `IsAttachment` 同口径
+  if (itemType.startsWith('image')) return 'image';
+  if (itemType.startsWith('file')) return 'file';
+
   // ItemType 优先
   switch (itemType) {
     case 'image':
@@ -169,7 +219,12 @@ export function resolveListControl(field: FieldMeta): ListControlType {
     case 'singleselect':
     case 'multipleselect':
       return 'lov';
+    case 'percent':
+    case 'percentage':
+    case 'money':
+      return 'number';
   }
+  if (parseDecimalItemType(itemType)) return 'number';
 
   const typeName = field.typeName;
 
@@ -278,6 +333,10 @@ export function enumOptionValue(key: string): string | number {
  * @returns 小数位数（0=整数），undefined 表示不限制
  */
 export function resolveNumberPrecision(field: FieldMeta): number | undefined {
+  // itemType=decimal(p,s) 声明的精度优先于 BindColumn.Scale
+  const decimalType = parseDecimalItemType(field.itemType);
+  if (decimalType) return decimalType.scale;
+
   // 后端显式返回了有效精度 → 直接用返回的精度
   const scale = field.scale ?? 0;
   if (scale > 0) return scale;
@@ -309,7 +368,8 @@ export function resolveNumberPrecision(field: FieldMeta): number | undefined {
  * @returns 步进值
  */
 export function resolveNumberStep(field: FieldMeta): number {
-  const scale = field.scale ?? 0;
+  const decimalType = parseDecimalItemType(field.itemType);
+  const scale = decimalType?.scale ?? field.scale ?? 0;
   if (scale > 0) return Math.pow(10, -scale);
   if (field.typeName === 'Single' || field.typeName === 'Double') return 0.1;
   if (field.typeName === 'Decimal') return 0.01;

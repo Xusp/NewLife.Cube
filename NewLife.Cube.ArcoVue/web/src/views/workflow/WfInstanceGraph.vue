@@ -8,7 +8,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { WorkflowInstanceDetail } from '@newlifex/api-core';
+import type { WorkflowInstanceDetail } from '@newlifex/cube';
 import { FlowGramDesigner, type WfNodeState } from './flowgram/FlowGramDesigner';
 import { graphToFlowDoc } from './flowgram/flowgramGraph';
 import { branchInfosOf, cardsOf } from './wfNodeCard';

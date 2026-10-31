@@ -3,20 +3,28 @@ import { ref, computed } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useMenuStore, type TreeMenuItem } from '@newlifex/cube-vue/core/stores/menu';
 import { getConfig } from '@newlifex/cube-vue/core/configure';
+import { useSiteStore } from '@newlifex/cube-vue/core/stores/site';
 import { openMenuTab } from '@newlifex/cube-vue/core/utils/menuTab';
 import ThemeSwitcher from '@newlifex/cube-vue/core/components/ThemeSwitcher.vue';
 import LayoutSwitcher from '@newlifex/cube-vue/core/components/LayoutSwitcher.vue';
+import LanguageSwitch from '@newlifex/cube-vue/core/components/LanguageSwitch.vue';
 import ModeSwitcher from '@newlifex/cube-vue/core/components/ModeSwitcher.vue';
 import NotificationBell from '@newlifex/cube-vue/core/components/NotificationBell.vue';
 import SearchBar from '@newlifex/cube-vue/core/components/SearchBar.vue';
 import UserProfile from '@newlifex/cube-vue/core/components/UserProfile.vue';
+import { filterVisibleMenuTree } from '@newlifex/cube-vue/core/utils/menuHelpers';
 
 const menuStore = useMenuStore();
 const { treeMenus, topLevelActiveMenu } = storeToRefs(menuStore);
 
+/** 隐藏菜单只参与路由注册，不出现在导航 */
+const visibleMenus = computed(() => filterVisibleMenuTree(treeMenus.value ?? []));
+
 const config = getConfig();
-const title = config.base.title;
-const logo = computed(() => config.base.logo);
+const siteStore = useSiteStore();
+void siteStore.load();
+const title = computed(() => siteStore.name || config.base.title);
+const logo = computed(() => siteStore.logo || config.base.logo);
 const openMenuId = ref<string | null>(null);
 
 const isMenuActive = (menu: TreeMenuItem) => topLevelActiveMenu.value?.id === menu.id;
@@ -80,7 +88,7 @@ const handleMegaMouseLeave = () => {
     <!-- 导航菜单 -->
     <nav class="tn-nav">
       <div
-        v-for="menu in treeMenus"
+        v-for="menu in visibleMenus"
         :key="menu.id"
         class="tn-item"
         :class="{ open: openMenuId === menu.id }"
@@ -165,6 +173,9 @@ const handleMegaMouseLeave = () => {
 
       <!-- 布局切换 -->
       <LayoutSwitcher />
+
+      <!-- 界面语言切换 -->
+      <LanguageSwitch />
 
       <NotificationBell />
       <UserProfile variant="navbar" />

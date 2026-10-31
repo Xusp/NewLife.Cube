@@ -7,7 +7,7 @@ import type {
   WorkflowEfficiencyResult,
   WorkflowEfficiencyRow,
   WorkflowEfficiencySlowItem,
-} from '@newlifex/api-core';
+} from '@newlifex/cube';
 import { Message } from '@arco-design/web-vue';
 import cubeApi from '@/api';
 import { formatApiError } from '@/core/utils/apiError';

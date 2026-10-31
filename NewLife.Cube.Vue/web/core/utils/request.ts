@@ -1,7 +1,7 @@
 /**
  * HTTP请求工具
  *
- * 底层复用 @newlifex/api-core 的 createCubeApi（内部 createApiClient），非 UI 的请求逻辑（host 拼接、
+ * 底层复用 @newlifex/cube 的 createCubeApi（内部 createApiClient），非 UI 的请求逻辑（host 拼接、
  * /api 前缀补全、Token 头注入、附加请求头、withCredentials、content-type 透传、traceId、204 处理、
  * 错误分类归一化、响应钩子 responseInterceptor）已全部迁移至 api-core，所有皮肤共享。
  *
@@ -19,7 +19,8 @@
  * 对外导出（request / cubeAxios / client / user / menu / page / config / tokenManager / toReLogin）
  * 保持兼容，业务文件无需改动。useCubeApi 复用本实例，不再单独创建 createCubeApi。
  */
-import { createCubeApi, type TokenStorage, type ResponseErrorInfo } from '@newlifex/api-core';
+import { createCubeApi, type TokenStorage, type ResponseErrorInfo } from '@newlifex/cube';
+import { getCurrentLanguage } from '../i18n';
 import type { AxiosInstance, AxiosResponse } from 'axios';
 import { ElMessage } from 'element-plus';
 import queryString from 'query-string';
@@ -166,6 +167,16 @@ function handleUnauthorized(url?: string) {
 }
 
 /**
+ * 剔除 .NET ArgumentException 自动追加的参数名后缀，如 "编码已存在 (Parameter 'Code')" → "编码已存在"。
+ * 该后缀属于框架内部细节，不应展示给最终用户。
+ * @param message 后端返回的错误消息
+ * @returns 去掉参数名后缀的消息
+ */
+function stripParameterSuffix(message: string) {
+  return String(message ?? '').replace(/\s*\(Parameter\s+'[^']+'\)\s*$/, '').trim();
+}
+
+/**
  * 错误弹窗（作为 api-core onResponseError 回调）。
  * api-core 已把网络/4xx/5xx 错误归一化为 ResponseErrorInfo（纯数据、无文案），
  * 此处负责本地化与展示——网络错误用中文提示，其余交给通知组件。
@@ -182,7 +193,7 @@ function showErrorNotification(info: ResponseErrorInfo) {
 let fieldErrorShown = false;
 const cubeConfig = getConfig();
 
-// 创建统一的魔方 API 客户端（底层来自 @newlifex/api-core 的 createCubeApi）
+// 创建统一的魔方 API 客户端（底层来自 @newlifex/cube 的 createCubeApi）
 // 内部派生两个客户端：entityClient(=client) 走 baseURL(API_HOST)；serviceClient(去掉 /api 前缀) 供 user/menu/config 使用。
 // unwrapResponse:false：createRequest 封装(page/user/menu/config)返回统一业务体 ApiResponse，调用方只需访问 res.data。
 // cube-vue 仅以回调接线 UI 行为（弹窗 / 401 跳转）与配置（附加头 / 请求钩子 / 响应钩子），其余下沉至 api-core。
@@ -195,8 +206,9 @@ const api = createCubeApi({
   unwrapResponse: false,
   additionalRequestHeaders: () => {
     const cfg = cubeConfig.request.additionalRequestHeaders;
-    if (!cfg) return {};
-    return typeof cfg === 'function' ? cfg() : cfg;
+    const headers = !cfg ? {} : typeof cfg === 'function' ? cfg() : cfg;
+    // Accept-Language 与 i18n 当前语言保持一致，后端按同一条链路返回本地化消息
+    return { 'Accept-Language': getCurrentLanguage(), ...headers };
   },
   onRequestHook: (config) => {
     const ri = cubeConfig.request.requestInterceptor;
@@ -210,7 +222,8 @@ const api = createCubeApi({
   // 字段级验证错误：统一 toast（原 useCubeApi 逻辑合并至 request，页面无需各自处理）
   onFieldError: (fieldErrors) => {
     fieldErrorShown = true;
-    ElMessage.error(fieldErrors.map(e => e.message).join('；'));
+    // ArgumentException 的 Message 会自动追加 "(Parameter 'Code')"，属于 .NET 内部细节，展示前剔除
+    ElMessage.error(fieldErrors.map(e => stripParameterSuffix(e.message)).join('；'));
   },
   // 业务错误：统一 toast；若同一响应已弹字段级错误或消息为空则跳过，微任务后重置标志
   onBusinessError: (_code, message) => {
@@ -249,7 +262,7 @@ export default request;
 export { request, client };
 export const cubeAxios = client;
 // user(认证) / menu(菜单) / page(通用 CRUD) / config(配置) / tokenManager(令牌)
-export const { user, menu, page, config, tokenManager } = api;
+export const { user, menu, page, config, site, tokenManager } = api;
 
 // 替换原来导出的toReLogin
 export { redirectToLogin as toReLogin };

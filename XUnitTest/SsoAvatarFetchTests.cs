@@ -29,23 +29,28 @@ public class SsoAvatarFetchTests : IDisposable
 
     public SsoAvatarFetchTests()
     {
-        // 启动本地图片服务，模拟 SSO 头像地址。随机端口，冲突时重试
-        _server = new HttpListener();
+        // 启动本地图片服务，模拟 SSO 头像地址。随机端口，冲突时重试。
+        // 注意：Start 失败后同一实例可能已被释放，重试必须换新实例，否则下一次访问 Prefixes 抛 ObjectDisposedException
+        var server = default(HttpListener);
+        var port = 0;
         for (var i = 0; i < 5; i++)
         {
-            _port = Rand.Next(20000, 60000);
-            _server.Prefixes.Clear();
-            _server.Prefixes.Add($"http://127.0.0.1:{_port}/");
+            port = Rand.Next(20000, 60000);
+            server = new HttpListener();
+            server.Prefixes.Add($"http://127.0.0.1:{port}/");
             try
             {
-                _server.Start();
+                server.Start();
                 break;
             }
             catch (System.Net.HttpListenerException)
             {
+                try { server.Close(); } catch { }
                 if (i == 4) throw;
             }
         }
+        _server = server!;
+        _port = port;
         _ = Task.Run(ProcessRequest);
 
         _tmpDir = Path.Combine(Path.GetTempPath(), "cube-avatar-test-" + Guid.NewGuid().ToString("N"));
@@ -314,17 +319,19 @@ public class SsoAvatarFetchTests : IDisposable
         var user = CreateUser();
         var old = CubeSetting.Current.AvatarPath;
         CubeSetting.Current.AvatarPath = _tmpDir;
+        // 使用唯一提供商名，避免与初始化种子数据（NewLife）或并行用例的 OAuthConfig 唯一键冲突
+        var provider = "Test" + Guid.NewGuid().ToString("N")[..8];
         try
         {
             // 先清理可能存在的测试数据（表不存在时忽略）
             try { UserConnect.Delete(UserConnect._.UserID == user.ID); } catch { }
-            try { OAuthConfig.Delete(OAuthConfig._.Name == "NewLife"); } catch { }
+            try { OAuthConfig.Delete(OAuthConfig._.Name == provider); } catch { }
 
             // 构造用户连接记录
             var uc = new UserConnect
             {
                 UserID = user.ID,
-                Provider = "NewLife",
+                Provider = provider,
                 Avatar = $"/avatar.png#md5${PngMd5}",
                 AccessToken = "",
                 Enable = true,
@@ -335,7 +342,7 @@ public class SsoAvatarFetchTests : IDisposable
             // 构造提供商配置（FetchAvatar + Server）
             var cfg = new OAuthConfig
             {
-                Name = "NewLife",
+                Name = provider,
                 Server = $"http://127.0.0.1:{_port}",
                 FetchAvatar = true,
                 Enable = true,
@@ -363,7 +370,7 @@ public class SsoAvatarFetchTests : IDisposable
             try
             {
                 UserConnect.Delete(UserConnect._.UserID == user.ID);
-                OAuthConfig.Delete(OAuthConfig._.Name == "NewLife");
+                OAuthConfig.Delete(OAuthConfig._.Name == provider);
             }
             catch { }
         }

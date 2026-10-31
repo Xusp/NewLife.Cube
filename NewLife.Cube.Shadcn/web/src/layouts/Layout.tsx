@@ -7,8 +7,9 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/stores/app';
 import { useUserStore } from '@/stores/user';
+import { closeAllTabs, closeTab, createTab, openTab, shouldAutoCollapseSidebar, type TabItem } from '@newlifex/cube';
 import api from '@/api';
-import type { MenuItem as CubeMenuItem } from '@newlifex/api-core';
+import type { MenuItem as CubeMenuItem } from '@newlifex/cube';
 
 export default function Layout() {
   const navigate = useNavigate();
@@ -19,12 +20,82 @@ export default function Layout() {
   const [menus, setMenus] = useState<CubeMenuItem[]>([]);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
+  // --- 多标签页 ---
+  const [tabs, setTabs] = useState<TabItem[]>([]);
+  const [activeTabId, setActiveTabId] = useState('');
+
+  useEffect(() => {
+    const tab = createTab(location.pathname, location.pathname + location.search, location.pathname);
+    setTabs((prev) => openTab(prev, tab));
+    setActiveTabId(tab.id);
+  }, [location.pathname, location.search]);
+
+  const activateTab = (tab: TabItem) => {
+    if (tab.id === activeTabId) return;
+    navigate(tab.fullPath);
+  };
+
+  const closeTabAndNavigate = (id: string) => {
+    setTabs((prev) => {
+      const result = closeTab(prev, id, activeTabId);
+      if (result.nextActiveId) {
+        setActiveTabId(result.nextActiveId);
+        const next = result.tabs.find((t) => t.id === result.nextActiveId);
+        if (next) navigate(next.fullPath);
+      }
+      return result.tabs;
+    });
+  };
+
+  const closeAll = () => {
+    const remaining = closeAllTabs(tabs);
+    setTabs(remaining);
+    const home = remaining[0];
+    if (home) {
+      setActiveTabId(home.id);
+      navigate(home.fullPath);
+    }
+  };
+  const [isNarrow, setIsNarrow] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+
   useEffect(() => {
     if (!api.tokenManager.getToken()) { navigate('/login'); return; }
     api.menu.getMenuTree().then((res) => setMenus(res.data ?? [])).catch(() => {});
-    api.user.getLoginConfig().then((res) => { if (res.data) setSiteInfo(res.data); }).catch(() => {});
+    // 站点品牌由匿名接口 /Cube/Site 提供；LoginConfig 只含登录能力
+    api.site.getSite().then((res) => { if (res.data) setSiteInfo(res.data); }).catch(() => {});
     if (!userInfo) fetchUserInfo().catch(() => {});
   }, []);
+
+  // 窄屏使用抽屉菜单；宽屏恢复用户手动展开
+  useEffect(() => {
+    let autoCollapsed = false;
+    const sync = () => {
+      const state = useAppStore.getState();
+      const narrow = shouldAutoCollapseSidebar(window.innerWidth);
+      setIsNarrow(narrow);
+      if (narrow) {
+        if (!state.collapsed) {
+          state.toggleCollapse();
+          autoCollapsed = true;
+        }
+      } else {
+        setMobileOpen(false);
+        if (autoCollapsed) {
+          if (state.collapsed) state.toggleCollapse();
+          autoCollapsed = false;
+        }
+      }
+    };
+    sync();
+    window.addEventListener('resize', sync);
+    return () => window.removeEventListener('resize', sync);
+  }, []);
+
+  // 路由切换后关闭抽屉
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname]);
 
   const handleLogout = async () => {
     await logout();
@@ -33,25 +104,43 @@ export default function Layout() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
-      {/* 侧边栏 */}
-      <aside className={cn(
-        'flex flex-col border-r bg-sidebar-background transition-all duration-200',
-        collapsed ? 'w-16' : 'w-60'
-      )}>
-        <div className="flex h-14 items-center justify-center border-b px-4">
-          {!collapsed && <span className="text-lg font-semibold truncate">{siteName}</span>}
+      {/* 侧边栏：宽屏常驻，窄屏为抽屉 */}
+      {!isNarrow && (
+        <aside className={cn(
+          'flex flex-col border-r bg-sidebar-background transition-all duration-200',
+          collapsed ? 'w-16' : 'w-60'
+        )}>
+          <div className="flex h-14 items-center justify-center border-b px-4">
+            {!collapsed && <span className="text-lg font-semibold truncate">{siteName}</span>}
+          </div>
+          <nav className="flex-1 overflow-y-auto py-2">
+            <SidebarItems menus={menus} collapsed={collapsed} currentPath={location.pathname} onNavigate={(p) => navigate(p)} />
+          </nav>
+        </aside>
+      )}
+      {isNarrow && mobileOpen && (
+        <div className="fixed inset-0 z-40 flex">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
+          <aside className="relative z-50 flex w-60 flex-col border-r bg-sidebar-background shadow-lg">
+            <div className="flex h-14 items-center justify-between border-b px-4">
+              <span className="text-lg font-semibold truncate">{siteName}</span>
+              <Button variant="ghost" size="icon" onClick={() => setMobileOpen(false)}>
+                <PanelLeftClose className="h-4 w-4" />
+              </Button>
+            </div>
+            <nav className="flex-1 overflow-y-auto py-2">
+              <SidebarItems menus={menus} collapsed={false} currentPath={location.pathname} onNavigate={(p) => navigate(p)} />
+            </nav>
+          </aside>
         </div>
-        <nav className="flex-1 overflow-y-auto py-2">
-          <SidebarItems menus={menus} collapsed={collapsed} currentPath={location.pathname} onNavigate={(p) => navigate(p)} />
-        </nav>
-      </aside>
+      )}
 
       {/* 主区域 */}
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* 顶栏 */}
         <header className="flex h-14 items-center gap-2 border-b px-4">
-          <Button variant="ghost" size="icon" onClick={toggleCollapse}>
-            {collapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+          <Button variant="ghost" size="icon" onClick={() => (isNarrow ? setMobileOpen(true) : toggleCollapse())}>
+            {!isNarrow && !collapsed ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeft className="h-4 w-4" />}
           </Button>
 
           <nav className="flex items-center gap-1 text-sm text-muted-foreground flex-1">
@@ -79,7 +168,25 @@ export default function Layout() {
         </header>
 
         {/* 内容 */}
-        <main className="flex-1 overflow-auto p-4">
+        <main className="flex-1 overflow-auto p-2 md:p-4">
+          {tabs.length > 1 ? (
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              {tabs.map((t) => (
+                <span
+                  key={t.id}
+                  className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-sm ${
+                    t.id === activeTabId ? 'border-primary bg-primary text-primary-foreground' : 'bg-card'
+                  }`}
+                >
+                  <button type="button" onClick={() => activateTab(t)}>{t.title}</button>
+                  {t.closable ? (
+                    <button type="button" className="text-xs" onClick={() => closeTabAndNavigate(t.id)}>×</button>
+                  ) : null}
+                </span>
+              ))}
+              <Button variant="ghost" size="sm" onClick={closeAll}>关闭全部</Button>
+            </div>
+          ) : null}
           <Outlet />
         </main>
       </div>

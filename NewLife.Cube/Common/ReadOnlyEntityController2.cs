@@ -69,7 +69,9 @@ public partial class ReadOnlyEntityController<TEntity>
     {
         var start = p["dtStart"].ToDateTime();
         var end = p["dtEnd"].ToDateTime();
+        // 列表工具栏搜索框 name="q"，部分控制器/旧链接使用 "Q"；两者都接受，避免关键字搜索被静默忽略
         var key = p["Q"];
+        if (key.IsNullOrEmpty()) key = p["q"];
 
         var whereExpression = Entity<TEntity>.SearchWhereByKeys(key);
         if (start > DateTime.MinValue || end > DateTime.MinValue)
@@ -90,14 +92,25 @@ public partial class ReadOnlyEntityController<TEntity>
         //    whereExpression &= col.Field == val;
         //}
 
-        // 添加映射字段查询
+        // 添加映射字段查询。多选搜索项按逗号拆分后使用 In，其余保持等值匹配
+        var searchFields = OnGetFields(ViewKinds.Search, null);
         foreach (var field in Factory.Fields)
         {
             var val = p[field.Name];
-            if (!val.IsNullOrWhiteSpace())
+            if (val.IsNullOrWhiteSpace()) continue;
+
+            var searchField = searchFields.FirstOrDefault(e => e.Name.EqualIgnoreCase(field.Name)) as SearchField;
+            if (searchField?.Multiple == true)
             {
-                whereExpression &= field.Equal(val.ChangeType(field.Type));
+                var values = val.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (values.Length > 1)
+                {
+                    whereExpression &= field.In(values);
+                    continue;
+                }
             }
+
+            whereExpression &= field.Equal(val.ChangeType(field.Type));
         }
 
         return Entity<TEntity>.FindAll(whereExpression, p);
@@ -170,7 +183,7 @@ public partial class ReadOnlyEntityController<TEntity>
                 if (builder == null)
                     p.State = dataScope;
                 else
-                    XTrace.WriteLine("[DataScope] 行权表达式合并跳过（WhereBuilder 解析失败）：{0} {1}", Factory.EntityType.Name, ex.Message);
+                    XTrace.WriteLine("[DataScope] Row filter merge skipped (WhereBuilder parse failed): {0} {1}", Factory.EntityType.Name, ex.Message);
             }
         }
 
@@ -297,10 +310,10 @@ public partial class ReadOnlyEntityController<TEntity>
         {
             // 数据权限
             var builder = CreateWhere();
-            if (builder != null && !builder.Eval(entity)) throw new InvalidOperationException($"非法访问数据[{key}]");
+            if (builder != null && !builder.Eval(entity)) throw new InvalidOperationException(L.T("Illegal data access [{0}]", key));
 
             // 行权（OSC-2608273d95）：详情与列表同一套 DataScope 范围
-            if (!CanAccess(entity)) throw new InvalidOperationException($"非法访问数据[{key}]");
+            if (!CanAccess(entity)) throw new InvalidOperationException(L.T("Illegal data access [{0}]", key));
         }
 
         return entity;
@@ -407,13 +420,13 @@ public partial class ReadOnlyEntityController<TEntity>
                 var speed = (Double)p.TotalCount / (24 * 3600);
                 var step = p.PageSize / speed;
 
-                XTrace.WriteLine("[{0}]导出数据[{1:n0}]，时间区间（{2},{3}），分片步进{4:n0}秒", Factory.EntityType.FullName, p.TotalCount, start, end, step);
+                XTrace.WriteLine("[{0}] Exporting {1:n0} rows in range ({2}, {3}) with a slice step of {4:n0} seconds", Factory.EntityType.FullName, p.TotalCount, start, end, step);
 
                 return ExportDataByDatetime((Int32)step, max);
             }
         }
 
-        XTrace.WriteLine("[{0}]导出数据[{1:n0}]，共[{2:n0}]页", Factory.EntityType.FullName, p.TotalCount, p.PageCount);
+        XTrace.WriteLine("[{0}] Exporting {1:n0} rows across {2:n0} pages", Factory.EntityType.FullName, p.TotalCount, p.PageCount);
 
         return ExportDataByPage(p.PageSize, max);
     }
@@ -545,49 +558,49 @@ public partial class ReadOnlyEntityController<TEntity>
     protected virtual String BuildChatSystemPrompt(AiChatRequest req, Pager? pager)
     {
         var tb = Factory.Table.DataTable;
-        var name = Factory.EntityType.GetDisplayName() ?? tb.DisplayName ?? Factory.EntityType.Name;
+        var name = L.T(Factory.EntityType.GetDisplayName() ?? tb.DisplayName ?? Factory.EntityType.Name);
         // 系统名称取系统设置里的配置，空值时兜底为默认名称
         var sysName = SysConfig?.DisplayName;
-        if (sysName.IsNullOrEmpty()) sysName = "魔方后台管理系统";
+        if (sysName.IsNullOrEmpty()) sysName = L.T("Cube admin console");
 
         var sb = Pool.StringBuilder.Get();
-        sb.AppendLine($"你是{sysName}的 AI 助手，正在协助管理员操作当前页面。");
+        sb.AppendLine(L.T("You are the AI assistant of {0}, helping an administrator work on the current page.", sysName));
         sb.AppendLine();
-        sb.AppendLine($"当前实体：{name}（表 {tb.TableName}）");
-        if (!tb.Description.IsNullOrEmpty()) sb.AppendLine($"实体说明：{tb.Description}");
-        var pageName = "列表页";
+        sb.AppendLine(L.T("Current entity: {0} (table {1})", name, tb.TableName));
+        if (!tb.Description.IsNullOrEmpty()) sb.AppendLine(L.T("Entity description: {0}", L.T(tb.Description)));
+        var pageName = L.T("List page");
         if (req is CubeAiChatRequest cubeReq)
         {
             // 页面字段由魔方请求（CubeAiChatRequest）承载，NAI 通用请求不含
             pageName = cubeReq.Page switch
             {
-                "form" => cubeReq.Mode.EqualIgnoreCase("edit") ? "编辑表单" : "新增表单",
-                "detail" => "详情页",
-                _ => "列表页",
+                "form" => cubeReq.Mode.EqualIgnoreCase("edit") ? L.T("Edit form") : L.T("Add form"),
+                "detail" => L.T("Detail page"),
+                _ => L.T("List page"),
             };
         }
-        sb.AppendLine($"页面类型：{pageName}");
-        if (req is CubeAiChatRequest cube && cube.Id > 0) sb.AppendLine($"当前记录编号：{cube.Id}");
+        sb.AppendLine(L.T("Page type: {0}", pageName));
+        if (req is CubeAiChatRequest cube && cube.Id > 0) sb.AppendLine(L.T("Current record id: {0}", cube.Id));
         if (pager != null && pager.Params.Count > 0)
         {
-            sb.AppendLine("当前查询条件：");
-            foreach (var kv in pager.Params.Where(e => !e.Key.EqualIgnoreCase("_query", "Sort", "Desc", "PageIndex", "PageSize")))
+            sb.AppendLine(L.T("Current query conditions:"));
+            foreach (var kv in pager.Params.Where(e => !e.Key.EqualIgnoreCase("_query", "Sort", "Desc", "PageIndex", "PageSize", "orderBy")))
             {
                 sb.AppendLine($"- {kv.Key}: {kv.Value}");
             }
         }
 
         sb.AppendLine();
-        sb.AppendLine("可用工具：get_data_context / get_form_schema / fill_form / get_page_context / get_system_info / run_js（详细说明见函数定义，按需调用）");
+        sb.AppendLine(L.T("Available tools: get_data_context / get_form_schema / fill_form / get_page_context / get_system_info / run_js (see the function definitions; call them when needed)"));
         sb.AppendLine();
-        sb.AppendLine("规则：");
-        sb.AppendLine("1. 使用简体中文回答，语言简洁专业");
-        sb.AppendLine("2. 用户要求分析/洞察当前数据或单条记录时，先调用 get_data_context 获取数据，再给出分析结论与建议");
-        sb.AppendLine("3. 用户要求新建/填写/补全表单时，先调用 get_form_schema 了解字段，再调用 fill_form 生成值（对 Value 为 null 的可填字段，若适合自动生成如编码 Code 类，应生成合理唯一值；对已有值的字段保持原值；不要编造邮箱/手机/生日等真实个人数据），最后提示用户检查后提交");
-        sb.AppendLine("4. 用户询问当前页面结构/页面元素（表格列、分页、可见数据行等 DOM 层信息）时，调用 get_page_context 采集浏览器当前页面内容");
-        sb.AppendLine("5. 用户询问系统状态/诊断时，调用 get_system_info");
-        sb.AppendLine("6. 用户要求读取或操作当前页面元素（填写输入框、点击按钮、读取标题等）时，可调用 run_js 执行 JavaScript；脚本在用户浏览器当前页面执行，可用 document.querySelector 等定位元素；修改页面内容或提交表单等写操作前，先向用户说明将执行的操作");
-        sb.AppendLine("7. 不要编造数据；信息不足时主动询问用户澄清");
+        sb.AppendLine(L.T("Rules:"));
+        sb.AppendLine(L.T("1. Answer in the same language as the user's question, concisely and professionally"));
+        sb.AppendLine(L.T("2. When the user asks to analyze or gain insight into the current data or a single record, call get_data_context first, then give conclusions and suggestions"));
+        sb.AppendLine(L.T("3. When the user asks to create, fill in or complete a form, call get_form_schema first to inspect the fields, then call fill_form to generate values (invent a reasonable unique value for empty writable fields such as codes when appropriate, keep existing values, and never fabricate real personal data such as emails, mobile numbers or birthdays); finally ask the user to review before submitting"));
+        sb.AppendLine(L.T("4. When the user asks about page structure or elements (table columns, paging, visible rows and other DOM details), call get_page_context to collect the current page content from the browser"));
+        sb.AppendLine(L.T("5. When the user asks about system status or diagnostics, call get_system_info"));
+        sb.AppendLine(L.T("6. When the user asks to read or operate elements of the current page (fill inputs, click buttons, read titles and so on), you may call run_js; the script runs in the user's current page and may use document.querySelector to locate elements; explain any write operation (changing page content, submitting forms) to the user before running it"));
+        sb.AppendLine(L.T("7. Never invent data; ask the user for clarification when information is insufficient"));
 
         return sb.Return(true);
     }
@@ -671,10 +684,10 @@ public partial class ReadOnlyEntityController<TEntity>
         {
             switch (type)
             {
-                case DataObjectMethodType.Select: throw new NoPermissionException(PermissionFlags.Detail, "无权查看数据");
-                case DataObjectMethodType.Update: throw new NoPermissionException(PermissionFlags.Update, "无权更新数据");
-                case DataObjectMethodType.Insert: throw new NoPermissionException(PermissionFlags.Insert, "无权新增数据");
-                case DataObjectMethodType.Delete: throw new NoPermissionException(PermissionFlags.Delete, "无权删除数据");
+                case DataObjectMethodType.Select: throw new NoPermissionException(PermissionFlags.Detail, L.T("No permission to view data."));
+                case DataObjectMethodType.Update: throw new NoPermissionException(PermissionFlags.Update, L.T("No permission to update data."));
+                case DataObjectMethodType.Insert: throw new NoPermissionException(PermissionFlags.Insert, L.T("No permission to insert data."));
+                case DataObjectMethodType.Delete: throw new NoPermissionException(PermissionFlags.Delete, L.T("No permission to delete data."));
             }
         }
 
@@ -709,7 +722,7 @@ public partial class ReadOnlyEntityController<TEntity>
                     case DataObjectMethodType.Delete:
                         // 修改/删除校验归属，防止跨租户操作
                         if (entityTenantId != tenantId)
-                            throw new NoPermissionException(PermissionFlags.None, $"无权操作其它租户的数据[{entityTenantId}]");
+                            throw new NoPermissionException(PermissionFlags.None, L.T("No permission to operate on data of another tenant [{0}]", entityTenantId));
                         break;
                 }
             }
@@ -815,6 +828,10 @@ public partial class ReadOnlyEntityController<TEntity>
             }
         }
 
+        // B2 请求期统一配置：派生类/区域基类可在此按请求参数、用户或数据量调整字段，
+        // 不依赖派生控制器是否声明静态构造函数。fields 已是副本，修改不会污染静态集合
+        OnConfigureFields(kind, fields);
+
         // 多租户关闭：表单/列表不再暴露租户字段（TenantId=0 表示全局，无需填写）
         if (!CubeSetting.Current.EnableTenant)
         {
@@ -830,8 +847,20 @@ public partial class ReadOnlyEntityController<TEntity>
         // 树形实体：父级字段自动配候选（ID→层级路径），表单可下拉选择而无需手填编号
         if (kind is ViewKinds.AddForm or ViewKinds.EditForm) ApplyTreeParentSource(fields, model as TEntity);
 
+        // 字段元数据按请求语言本地化。fields 已是克隆副本，源文（英文）保留在静态字段集合中
+        foreach (var item in fields)
+        {
+            item.Localize();
+        }
+
         return fields;
     }
+
+    /// <summary>请求期调整字段集合。每次获取字段后调用，可在此按当前请求统一增删改字段</summary>
+    /// <param name="kind">字段类型</param>
+    /// <param name="fields">字段集合副本，可就地修改</param>
+    /// <remarks>与静态构造函数相比，本方法不依赖派生控制器是否声明静态构造，也不会污染静态字段集合</remarks>
+    protected virtual void OnConfigureFields(ViewKinds kind, FieldCollection fields) { }
 
     /// <summary>展开字段</summary>
     protected virtual FieldCollection OnExpandFields(ExpandField field, TEntity entity, Object parameter) => field.Expand(entity, parameter);

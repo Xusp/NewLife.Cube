@@ -11,11 +11,54 @@ public static class DatabaseHelper
 
     /// <summary>Membership 数据库连接字符串</summary>
     private static String MembershipConnStr =>
-        $"Data Source={AppFixture.DataDir}\\Membership.db;Mode=ReadOnly";
+        $"Data Source={System.IO.Path.Combine(AppFixture.DataDir, "Membership.db")};Mode=ReadOnly";
 
     /// <summary>Log 数据库连接字符串</summary>
     private static String LogConnStr =>
-        $"Data Source={AppFixture.DataDir}\\Log.db;Mode=ReadOnly";
+        $"Data Source={System.IO.Path.Combine(AppFixture.DataDir, "Log.db")};Mode=ReadOnly";
+
+    /// <summary>确认内置 admin 账号可用。注册首个用户会抢占管理员并禁用 admin，测试间需要复位</summary>
+    /// <returns>受影响行数</returns>
+    public static Int32 EnsureAdminEnabled()
+    {
+        const String sql = "UPDATE User SET Enable = 1 WHERE Name = 'admin'; SELECT changes();";
+        return ExecuteScalarWrite<Int32>(MembershipWriteConnStr, sql);
+    }
+
+    /// <summary>统计 Role 表中角色名精确匹配的行数</summary>
+    /// <param name="name">角色名</param>
+    /// <returns>匹配行数</returns>
+    public static Int32 CountRolesByName(String name)
+    {
+        const String sql = "SELECT COUNT(*) FROM Role WHERE Name = @name";
+        return ExecuteScalar<Int32>(MembershipConnStr, sql, ("@name", name));
+    }
+
+    /// <summary>按角色名获取角色编号</summary>
+    /// <param name="name">角色名</param>
+    /// <returns>角色编号，不存在时返回 0</returns>
+    public static Int32 GetRoleIdByName(String name)
+    {
+        const String sql = "SELECT IFNULL(ID, 0) FROM Role WHERE Name = @name LIMIT 1";
+        return ExecuteScalar<Int32>(MembershipConnStr, sql, ("@name", name));
+    }
+
+    /// <summary>按角色名删除角色（测试清理）</summary>
+    /// <param name="name">角色名</param>
+    /// <returns>受影响行数</returns>
+    public static Int32 DeleteRoleByName(String name)
+    {
+        const String sql = "DELETE FROM Role WHERE Name = @name; SELECT changes();";
+        return ExecuteScalarWrite<Int32>(MembershipWriteConnStr, sql, ("@name", name));
+    }
+
+    /// <summary>把内置 admin 恢复为默认密码（MD5("admin")）并启用</summary>
+    /// <returns>受影响行数</returns>
+    public static Int32 RestoreAdminPassword()
+    {
+        const String sql = "UPDATE User SET Password = '21232F297A57A5A743894A0E4A801FC3', Enable = 1 WHERE Name = 'admin'; SELECT changes();";
+        return ExecuteScalarWrite<Int32>(MembershipWriteConnStr, sql);
+    }
 
     #endregion
 
@@ -160,6 +203,22 @@ public static class DatabaseHelper
         return ExecuteScalar<Int32>(MembershipConnStr, sql, ("@name", username));
     }
 
+    /// <summary>删除指定名称的 OAuthConfig（测试清理）</summary>
+    /// <param name="name">OAuth 提供者名称</param>
+    public static void DeleteOAuthConfig(String name)
+    {
+        const String sql = "DELETE FROM OAuthConfig WHERE Name = @name";
+        ExecuteScalarWrite<Int32>(CubeWriteConnStr, sql, ("@name", name));
+    }
+
+    /// <summary>删除指定租户（测试清理）</summary>
+    /// <param name="id">租户 Id</param>
+    public static void DeleteTenant(Int32 id)
+    {
+        const String sql = "DELETE FROM Tenant WHERE Id = @id";
+        ExecuteScalarWrite<Int32>(MembershipWriteConnStr, sql, ("@id", id));
+    }
+
     /// <summary>查询角色权限字符串</summary>
     /// <param name="roleId">角色 Id</param>
     /// <returns>Permission 字段值，不存在返回 null</returns>
@@ -203,11 +262,11 @@ public static class DatabaseHelper
 
     /// <summary>Membership 数据库写连接字符串（Tenant 等表）</summary>
     private static String MembershipWriteConnStr =>
-        $"Data Source={AppFixture.DataDir}\\Membership.db";
+        $"Data Source={System.IO.Path.Combine(AppFixture.DataDir, "Membership.db")}";
 
     /// <summary>Cube 数据库写连接字符串（OAuthConfig 等表）</summary>
     private static String CubeWriteConnStr =>
-        $"Data Source={AppFixture.DataDir}\\Cube.db";
+        $"Data Source={System.IO.Path.Combine(AppFixture.DataDir, "Cube.db")}";
 
     /// <summary>确保租户存在，不存在则插入，返回租户 Id</summary>
     /// <param name="name">租户名称</param>
@@ -309,7 +368,7 @@ public static class DatabaseHelper
 
     /// <summary>Log 数据库写连接字符串（NotificationRecord 等表）</summary>
     private static String LogWriteConnStr =>
-        $"Data Source={AppFixture.DataDir}\\Log.db";
+        $"Data Source={System.IO.Path.Combine(AppFixture.DataDir, "Log.db")}";
 
     /// <summary>写入一条未读站内信（默认系统级广播 UserId=0），返回记录 Id</summary>
     /// <param name="title">标题（建议唯一值便于断言）</param>

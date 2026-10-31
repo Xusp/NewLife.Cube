@@ -17,10 +17,11 @@
  * ```
  */
 import { client, user, menu, page, config, tokenManager } from '../utils/request';
-import type { ApiResponse, PageParams } from '@newlifex/api-core';
+import type { ApiResponse, PageParams } from '@newlifex/cube';
+import type { AxiosResponse } from 'axios';
 
 // ── 全局 API 客户端实例 ──────────────────────────────────────────────
-// 复用 request.ts 的统一 createCubeApi 实例（底层 @newlifex/api-core），此处不再单独创建第二份实例。
+// 复用 request.ts 的统一 createCubeApi 实例（底层 @newlifex/cube），此处不再单独创建第二份实例。
 // createCubeApi 初始化（baseURL、tokenStorage、附加头、401 跳转、onFieldError/onBusinessError/onResponseError）
 // 已全部合并到 request.ts；本文件仅组装为 cubeApi 对外形态 { client, tokenManager, user, menu, page, config }，
 // 避免两份 client 与 tokenStorage 造成解包语义与 Token 分叉。
@@ -76,9 +77,6 @@ export function usePageApi(area: string, controller: string) {
     /** 获取页面元数据（字段配置 + 页面设置） */
     getPage: () => cubeApi.page.getPage(type),
 
-    /** 获取指定类型的字段列表 */
-    getFields: (kind: number) => cubeApi.page.getFields(type, kind),
-
     /** 分页列表查询 */
     getList: <T = Record<string, unknown>>(params: PageParams) =>
       cubeApi.page.getList<T>(type, params),
@@ -124,7 +122,15 @@ export function usePageApi(area: string, controller: string) {
       cubeApi.client.request<ApiResponse<T>>({
         url: `${type}/${action}`,
         method: 'get',
-      }).then(res => res.data),
+      }).then((res: AxiosResponse<ApiResponse<T>>) => res.data),
+
+    /** 调用自定义 Action（POST） */
+    postAction: <T = unknown>(action: string, data?: unknown) =>
+      cubeApi.client.request<ApiResponse<T>>({
+        url: `${type}/${action}`,
+        method: 'post',
+        data,
+      }).then((res: AxiosResponse<ApiResponse<T>>) => res.data),
 
     /**
      * 字典/枚举查询

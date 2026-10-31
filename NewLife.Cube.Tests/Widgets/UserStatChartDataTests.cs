@@ -1,21 +1,73 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Text.Json;
 using NewLife.Cube.Areas.Admin.Controllers;
 using NewLife.Cube.Entity;
+using XCode.DataAccessLayer;
 using Xunit;
 
 namespace NewLife.Cube.Tests.Widgets;
 
-/// <summary>用户统计图表数据单元测试。验证 OnGetChartData 构建 3 个 ECharts option（主折线 + 箱线 + K线），纯内存数据不访问数据库</summary>
-public class UserStatChartDataTests
+/// <summary>用户统计图表数据测试集合。兜底查库路径访问数据库，集合禁并行（串行执行），避免与其它测试集合互相污染连接映射</summary>
+[CollectionDefinition("UserStatChartData", DisableParallelization = true)]
+public class UserStatChartDataCollection
 {
+}
+
+/// <summary>用户统计图表数据单元测试。验证 OnGetCharts 构建 3 个 ECharts option（主折线 + 箱线 + K线）</summary>
+[Collection("UserStatChartData")]
+public class UserStatChartDataTests : IDisposable
+{
+    private readonly String _connName = "UserStatChartUnit";
+    private readonly String _dbFile;
+    private readonly String _oldConnName;
+
+    public UserStatChartDataTests()
+    {
+        // OnGetCharts 空列表时兜底查库；测试期间把 UserStat 重映射到独立空库，
+        // 保证"空数据"语义与运行机器/其它测试集合的库状态无关
+        var dir = Path.Combine(AppContext.BaseDirectory, "Data");
+        Directory.CreateDirectory(dir);
+        _dbFile = Path.Combine(dir, "UserStatChartUnit.db");
+        foreach (var f in Directory.GetFiles(dir, "UserStatChartUnit.db*"))
+        {
+            try { File.Delete(f); } catch { }
+        }
+
+        DAL.AddConnStr(_connName, $"Data Source={_dbFile}", null, "SQLite");
+        _oldConnName = NewLife.Cube.Entity.UserStat.Meta.ConnName;
+        NewLife.Cube.Entity.UserStat.Meta.ConnName = _connName;
+
+        // 显式建空表：兜底查询需要表存在才能稳定返回空集；不依赖 XCode 反向工程（其迁移配置在测试进程内可能关闭）
+        DAL.Create(_connName).Execute("Create Table If Not Exists UserStat(Id INTEGER Primary Key AutoIncrement, Date DATETIME, Total INTEGER, Logins INTEGER, OAuths INTEGER, MaxOnline INTEGER, Actives INTEGER, ActivesT7 INTEGER, ActivesT30 INTEGER, News INTEGER, NewsT7 INTEGER, NewsT30 INTEGER, OnlineTime INTEGER, CreateTime DATETIME, UpdateTime DATETIME)");
+    }
+
+    public void Dispose()
+    {
+        NewLife.Cube.Entity.UserStat.Meta.ConnName = _oldConnName;
+        try { DAL.Create(_connName).Reset(); } catch { }
+        DAL.ConnStrs?.TryRemove(_connName, out _);
+        try
+        {
+            foreach (var f in Directory.GetFiles(Path.GetDirectoryName(_dbFile)!, "UserStatChartUnit.db*"))
+            {
+                File.Delete(f);
+            }
+        }
+        catch
+        {
+            // 忽略清理失败
+        }
+    }
+
     #region 测试控制器
     private class TestUserStatController : UserStatController
     {
-        /// <summary>暴露 OnGetChartData 供测试（protected override 无法直接调用）</summary>
-        public Object[] TestOnGetChartData(IEnumerable<UserStat> data) => OnGetChartData(data);
+        /// <summary>暴露 OnGetCharts 供测试（protected override 无法直接调用）</summary>
+        public Object[] TestOnGetCharts(IEnumerable<UserStat> data) => OnGetCharts(data);
     }
     #endregion
 
@@ -48,13 +100,13 @@ public class UserStatChartDataTests
     private static JsonElement ToJson(Object obj)
         => JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(obj)).RootElement;
 
-    [Fact(DisplayName = "OnGetChartData_有数据_返回3个图表")]
-    public void OnGetChartData_HasData_Returns3Charts()
+    [Fact(DisplayName = "OnGetCharts_有数据_返回3个图表")]
+    public void OnGetCharts_HasData_Returns3Charts()
     {
         var ctrl = new TestUserStatController();
         var list = BuildData(5);
 
-        var rs = ctrl.TestOnGetChartData(list);
+        var rs = ctrl.TestOnGetCharts(list);
 
         Assert.Equal(3, rs.Length);
 
@@ -85,31 +137,41 @@ public class UserStatChartDataTests
         Assert.Equal(4, candleData[0].GetArrayLength());
     }
 
-    [Fact(DisplayName = "OnGetChartData_有数据_主折线含三Y轴与系列名")]
-    public void OnGetChartData_HasData_LineHas3YAxis()
+    [Fact(DisplayName = "OnGetCharts_有数据_主折线含三Y轴与系列名")]
+    public void OnGetCharts_HasData_LineHas3YAxis()
     {
-        var ctrl = new TestUserStatController();
-        var list = BuildData(3);
+        // 实体元数据以中文为源文，图例名随请求语言翻译；本用例固定中文以断言源文系列名
+        var prev = Localization.Culture;
+        Localization.Culture = CultureInfo.GetCultureInfo("zh-CN");
+        try
+        {
+            var ctrl = new TestUserStatController();
+            var list = BuildData(3);
 
-        var rs = ctrl.TestOnGetChartData(list);
+            var rs = ctrl.TestOnGetCharts(list);
 
-        var chart = ToJson(rs[0]!);
-        // 三 Y 轴：用户数 / 总数 / 时长
-        Assert.Equal(3, chart.GetProperty("yAxis").GetArrayLength());
+            var chart = ToJson(rs[0]!);
+            // 三 Y 轴：用户数 / 总数 / 时长
+            Assert.Equal(3, chart.GetProperty("yAxis").GetArrayLength());
 
-        // 图例包含关键系列名
-        var legend = chart.GetProperty("legend").GetProperty("data").EnumerateArray().Select(e => e.GetString()).ToArray();
-        Assert.Contains("总数", legend);
-        Assert.Contains("在线时间", legend);
+            // 图例包含关键系列名（实体元数据以中文为源文）
+            var legend = chart.GetProperty("legend").GetProperty("data").EnumerateArray().Select(e => e.GetString()).ToArray();
+            Assert.Contains("总数", legend);
+            Assert.Contains("在线时间", legend);
+        }
+        finally
+        {
+            Localization.Culture = prev;
+        }
     }
 
-    [Fact(DisplayName = "OnGetChartData_空数据_返回空数组")]
-    public void OnGetChartData_Empty_ReturnsEmpty()
+    [Fact(DisplayName = "OnGetCharts_空数据_返回空数组")]
+    public void OnGetCharts_Empty_ReturnsEmpty()
     {
         var ctrl = new TestUserStatController();
 
-        // 直接传空数组（OnGetChartData 内部空列表时兜底查库，但传空则返回 []）
-        var rs = ctrl.TestOnGetChartData([]);
+        // 直接传空数组（OnGetCharts 内部空列表时兜底查库，但传空则返回 []）
+        var rs = ctrl.TestOnGetCharts([]);
 
         Assert.Empty(rs);
     }

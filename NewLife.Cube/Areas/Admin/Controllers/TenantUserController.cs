@@ -12,6 +12,29 @@ public class TenantUserController : EntityController<TenantUser, TenantUserModel
     static TenantUserController()
     {
         LogOnChange = true;
+
+        // 列表精简：主键与审计字段不上列表（对齐 MVC）
+        ListFields.RemoveField("ID", "Remark").RemoveField("CreateUserId", "CreateTime", "CreateIP", "UpdateUserId", "UpdateTime", "UpdateIP");
+
+        // 角色分配：RoleIds 多选 + RoleId 主角色，数据源为角色缓存（对齐 MVC）
+        {
+            var df = AddFormFields.AddDataField("RoleIds", "RoleNames");
+            df.DataSource = entity => Role.FindAllWithCache().OrderByDescending(e => e.Sort).ToDictionary(e => e.ID, e => e.Name);
+            AddFormFields.RemoveField("RoleNames");
+
+            df = EditFormFields.AddDataField("RoleIds", "RoleNames");
+            df.DataSource = entity => Role.FindAllWithCache().OrderByDescending(e => e.Sort).ToDictionary(e => e.ID, e => e.Name);
+            EditFormFields.RemoveField("RoleNames");
+        }
+        {
+            var df = AddFormFields.AddDataField("RoleId", "RoleName");
+            df.DataSource = entity => Role.FindAllWithCache().OrderByDescending(e => e.Sort).ToDictionary(e => e.ID, e => e.Name);
+            AddFormFields.RemoveField("RoleName");
+
+            df = EditFormFields.AddDataField("RoleId", "RoleName");
+            df.DataSource = entity => Role.FindAllWithCache().OrderByDescending(e => e.Sort).ToDictionary(e => e.ID, e => e.Name);
+            EditFormFields.RemoveField("RoleName");
+        }
     }
 
     /// <summary>搜索数据集（租户模式强制当前租户）</summary>

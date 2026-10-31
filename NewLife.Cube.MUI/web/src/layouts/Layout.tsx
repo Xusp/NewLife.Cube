@@ -3,7 +3,7 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   AppBar, Box, Drawer, IconButton, List, ListItemButton, ListItemIcon,
   ListItemText, Toolbar, Typography, Menu, MenuItem, Avatar, Collapse,
-  Divider, Switch, FormControlLabel, Breadcrumbs, Link,
+  Divider, Switch, FormControlLabel, Breadcrumbs, Link, Chip, Button,
 } from '@mui/material';
 import {
   Menu as MenuIcon, ChevronLeft, ExpandLess, ExpandMore,
@@ -11,8 +11,9 @@ import {
 } from '@mui/icons-material';
 import { useAppStore } from '@/stores/app';
 import { useUserStore } from '@/stores/user';
+import { closeAllTabs, closeTab, createTab, openTab, shouldAutoCollapseSidebar, type TabItem } from '@newlifex/cube';
 import api from '@/api';
-import type { MenuItem as CubeMenuItem } from '@newlifex/api-core';
+import type { MenuItem as CubeMenuItem } from '@newlifex/cube';
 
 const DRAWER_WIDTH = 240;
 
@@ -24,6 +25,45 @@ export default function Layout() {
 
   const [menus, setMenus] = useState<CubeMenuItem[]>([]);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [isNarrow, setIsNarrow] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  // --- 多标签页 ---
+  const [tabs, setTabs] = useState<TabItem[]>([]);
+  const [activeTabId, setActiveTabId] = useState('');
+
+  useEffect(() => {
+    const tab = createTab(location.pathname, location.pathname + location.search, location.pathname);
+    setTabs((prev) => openTab(prev, tab));
+    setActiveTabId(tab.id);
+  }, [location.pathname, location.search]);
+
+  const activateTab = (tab: TabItem) => {
+    if (tab.id === activeTabId) return;
+    navigate(tab.fullPath);
+  };
+
+  const closeTabAndNavigate = (id: string) => {
+    setTabs((prev) => {
+      const result = closeTab(prev, id, activeTabId);
+      if (result.nextActiveId) {
+        setActiveTabId(result.nextActiveId);
+        const next = result.tabs.find((t) => t.id === result.nextActiveId);
+        if (next) navigate(next.fullPath);
+      }
+      return result.tabs;
+    });
+  };
+
+  const closeAll = () => {
+    const remaining = closeAllTabs(tabs);
+    setTabs(remaining);
+    const home = remaining[0];
+    if (home) {
+      setActiveTabId(home.id);
+      navigate(home.fullPath);
+    }
+  };
+
 
   // 检查登录
   useEffect(() => {
@@ -34,10 +74,41 @@ export default function Layout() {
     // 加载菜单
     api.menu.getMenuTree().then((res) => setMenus(res.data ?? [])).catch(() => {});
     // 加载站点信息
-    api.user.getLoginConfig().then((res) => { if (res.data) setSiteInfo(res.data); }).catch(() => {});
+    // 站点品牌由匿名接口 /Cube/Site 提供；LoginConfig 只含登录能力
+    api.site.getSite().then((res) => { if (res.data) setSiteInfo(res.data); }).catch(() => {});
     // 加载用户信息
     if (!userInfo) fetchUserInfo().catch(() => {});
   }, []);
+
+  // 窄屏使用抽屉菜单；宽屏恢复用户手动展开
+  useEffect(() => {
+    let autoCollapsed = false;
+    const sync = () => {
+      const state = useAppStore.getState();
+      const narrow = shouldAutoCollapseSidebar(window.innerWidth);
+      setIsNarrow(narrow);
+      if (narrow) {
+        if (!state.collapsed) {
+          state.toggleCollapse();
+          autoCollapsed = true;
+        }
+      } else {
+        setMobileOpen(false);
+        if (autoCollapsed) {
+          if (state.collapsed) state.toggleCollapse();
+          autoCollapsed = false;
+        }
+      }
+    };
+    sync();
+    window.addEventListener('resize', sync);
+    return () => window.removeEventListener('resize', sync);
+  }, []);
+
+  // 路由切换后关闭抽屉
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname]);
 
   const handleLogout = async () => {
     setAnchorEl(null);
@@ -47,34 +118,41 @@ export default function Layout() {
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
-      {/* 侧边栏 */}
+      {/* 侧边栏：宽屏常驻，窄屏为抽屉 */}
       <Drawer
-        variant="permanent"
+        variant={isNarrow ? 'temporary' : 'permanent'}
+        open={isNarrow ? mobileOpen : true}
+        onClose={() => setMobileOpen(false)}
         sx={{
-          width: collapsed ? 64 : DRAWER_WIDTH,
+          width: isNarrow ? DRAWER_WIDTH : collapsed ? 64 : DRAWER_WIDTH,
           flexShrink: 0,
           '& .MuiDrawer-paper': {
-            width: collapsed ? 64 : DRAWER_WIDTH,
+            width: isNarrow ? DRAWER_WIDTH : collapsed ? 64 : DRAWER_WIDTH,
             transition: 'width 0.2s',
             overflowX: 'hidden',
           },
         }}
       >
         <Toolbar sx={{ justifyContent: 'center' }}>
-          {!collapsed && <Typography variant="h6" noWrap>{siteName}</Typography>}
+          {(!collapsed || isNarrow) && <Typography variant="h6" noWrap>{siteName}</Typography>}
         </Toolbar>
         <Divider />
         <List component="nav" dense>
-          <SidebarItems menus={menus} collapsed={collapsed} onNavigate={(url) => navigate(url)} currentPath={location.pathname} />
+          <SidebarItems
+            menus={menus}
+            collapsed={isNarrow ? false : collapsed}
+            onNavigate={(url) => navigate(url)}
+            currentPath={location.pathname}
+          />
         </List>
       </Drawer>
 
       {/* 主区域 */}
-      <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+      <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <AppBar position="sticky" color="default" elevation={1}>
           <Toolbar variant="dense">
-            <IconButton edge="start" onClick={toggleCollapse} sx={{ mr: 1 }}>
-              {collapsed ? <MenuIcon /> : <ChevronLeft />}
+            <IconButton edge="start" onClick={() => (isNarrow ? setMobileOpen(true) : toggleCollapse())} sx={{ mr: 1 }}>
+              {!isNarrow && !collapsed ? <ChevronLeft /> : <MenuIcon />}
             </IconButton>
 
             <Breadcrumbs sx={{ flexGrow: 1 }}>
@@ -98,6 +176,21 @@ export default function Layout() {
         </AppBar>
 
         <Box sx={{ p: 2, flexGrow: 1, overflow: 'auto' }}>
+          {tabs.length > 1 ? (
+            <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+              {tabs.map((t) => (
+                <Chip
+                  key={t.id}
+                  label={t.title}
+                  color={t.id === activeTabId ? 'primary' : 'default'}
+                  variant={t.id === activeTabId ? 'filled' : 'outlined'}
+                  onClick={() => activateTab(t)}
+                  onDelete={t.closable ? () => closeTabAndNavigate(t.id) : undefined}
+                />
+              ))}
+              <Button size="small" onClick={closeAll}>关闭全部</Button>
+            </Box>
+          ) : null}
           <Outlet />
         </Box>
       </Box>

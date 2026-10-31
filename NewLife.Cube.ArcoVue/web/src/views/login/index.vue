@@ -138,7 +138,7 @@
 </template>
 
 <script setup lang="ts">
-import type { OAuthProvider } from '@newlifex/api-core';
+import type { OAuthProvider } from '@newlifex/cube';
 import { useLoginPage } from './useLoginPage';
 
 const {

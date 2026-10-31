@@ -18,7 +18,7 @@ public class WorkflowTimeoutJob : CubeJobBase
         try
         {
             var rs = WorkflowEngine.TimeoutTick();
-            XTrace.WriteLine("审批超时扫描：{0}", rs);
+            XTrace.WriteLine("Approval timeout scan: {0}", rs);
             return Task.FromResult(rs);
         }
         catch (Exception ex)

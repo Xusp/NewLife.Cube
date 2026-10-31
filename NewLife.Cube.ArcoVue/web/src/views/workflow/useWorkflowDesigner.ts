@@ -1,6 +1,6 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { FieldKind, type DataField, type WorkflowDefinitionItem, type WorkflowPhrase } from '@newlifex/api-core';
+import { FieldKind, type DataField, type WorkflowDefinitionItem, type WorkflowPhrase } from '@newlifex/cube';
 import { Message } from '@arco-design/web-vue';
 import { createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

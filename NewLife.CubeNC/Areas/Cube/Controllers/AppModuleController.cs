@@ -19,8 +19,8 @@ public class AppModuleController : EntityController<AppModule, AppModuleModel>
 
         {
             var df = ListFields.AddListField("Log");
-            df.DisplayName = "日志";
-            df.Url = "/Admin/Log?category=应用插件&linkId={Id}";
+            df.DisplayName = "Log";
+            df.Url = "/Admin/Log?category=App plugin&linkId={Id}";
             df.Target = "_blank";
         }
     }
@@ -29,8 +29,8 @@ public class AppModuleController : EntityController<AppModule, AppModuleModel>
     /// <summary>
     /// 高级搜索
     /// </summary>
-    /// <param name="p"></param>
-    /// <returns></returns>
+    /// <param name="p">分页与搜索参数</param>
+    /// <returns>应用插件列表</returns>
     protected override IEnumerable<AppModule> Search(Pager p)
     {
         if (!_inited)

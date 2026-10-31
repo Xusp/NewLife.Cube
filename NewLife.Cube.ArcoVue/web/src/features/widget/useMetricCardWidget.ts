@@ -1,6 +1,6 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import type { WidgetQueryResult } from '@newlifex/api-core';
+import type { WidgetQueryResult } from '@newlifex/cube';
 import { ensureEchartsTheme, initEcharts, type EChartsHandle } from '@/core/utils/echartsTheme';
 import { themeColor } from '@/core/utils/themeColor';
 import { resolveWorkbenchIcon } from '@/core/utils/workbench';

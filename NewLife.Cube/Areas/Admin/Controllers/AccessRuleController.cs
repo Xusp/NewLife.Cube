@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.AspNetCore.Mvc;
 using NewLife.Cube.Entity;
 using NewLife.Cube.Services;
@@ -24,8 +24,11 @@ public class AccessRuleController : EntityController<AccessRule, AccessRuleModel
         // 过期时间列改造为解封操作列：点击自动封禁行的解封时间即可解除封禁
         if (ListFields.GetField("ExpireTime") is ListField df)
         {
-            df.DisplayName = "解封时间";
+            df.DisplayName = "Unblock time";
             df.Url = "/api/Admin/AccessRule/Unblock?id={Id}";
+            // 前端列表按 AJAX 调用并把返回消息提示给用户，随后刷新列表；
+            // 未标记时浏览器点击会整页跳走，拿不到解封结果提示
+            df.DataAction = "get";
         }
     }
 
@@ -36,12 +39,13 @@ public class AccessRuleController : EntityController<AccessRule, AccessRuleModel
     /// <summary>解除自动封禁</summary>
     /// <param name="id">规则编号</param>
     /// <returns></returns>
+    [HttpGet]
     [EntityAuthorize(PermissionFlags.Update)]
     [DisplayName("解封")]
     public ActionResult Unblock(Int32 id)
     {
         var rule = AccessRule.FindById(id);
-        if (rule == null || !rule.IsAutoBlock) return Json(1, "该规则不是自动封禁规则");
+        if (rule == null || !rule.IsAutoBlock) return Json(1, L.T("This rule is not an auto-block rule."));
 
         var rs = _blockService.Unblock(rule.IP);
 
@@ -49,6 +53,6 @@ public class AccessRuleController : EntityController<AccessRule, AccessRuleModel
         var accept = Request.Headers.Accept + "";
         if (accept.Contains("text/html")) return Redirect("/Admin/AccessRule");
 
-        return rs > 0 ? Json(0, $"已解除 {rule.IP} 的封禁") : Json(1, "解封失败");
+        return rs > 0 ? Json(0, L.T("Unblocked [{0}] successfully.", rule.IP)) : Json(1, L.T("Unblock failed."));
     }
 }

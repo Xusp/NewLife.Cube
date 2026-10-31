@@ -2,7 +2,7 @@
  * 登录页 API 封装（兼容层）
  *
  * 本文件仅作为皮肤兼容壳：保留原有导出函数名与签名，供 LoginPage / ActivatePage /
- * ProfileSecurity 等业务页零改动调用；实际请求全部委托 @newlifex/api-core 的
+ * ProfileSecurity 等业务页零改动调用；实际请求全部委托 @newlifex/cube 的
  * user 认证 API（注册 / 发码 / 验证码 / 激活 / 验证联系方式等），不重复实现基础库已有功能。
  *
  * 基础库已下沉的能力（不再在此处实现）：
@@ -10,76 +10,48 @@
  * - 登录结果字段归一化（access_token / Token → accessToken）由 api-core 响应拦截器统一处理
  *   （LOGIN_RESULT_PATHS 含 /Auth/Login、/Auth/Register、/Auth/Refresh 等），皮肤无需重复归一化。
  *
- * 类型定义复用 @newlifex/api-core 的 LoginConfig、LoginResult、ApiResponse 等。
+ * 类型定义复用 @newlifex/cube 的 LoginConfig、SiteConfig、LoginResult、ApiResponse 等。
  *
  * 注意：基础库的响应拦截器会在 code !== 0/200 时自动弹出错误提示并抛异常，
  * 业务调用方在 catch 中处理失败即可（无需自行弹错，避免重复提示）。
  */
-import { user } from './request';
-import type { ApiResponse, LoginConfig, LoginResult, OAuthProvider, RegisterModel, VerifyStatus } from '@newlifex/api-core';
+import { user, site } from './request';
+import type { ApiResponse, LoginConfig, LoginResult, RegisterModel, ResetPasswordModel, SiteConfig, VerifyStatus } from '@newlifex/cube';
 
-// ── 字段名归一化工具（皮肤专属，基础库无此逻辑，仅保留） ─────────────
-
-/**
- * 归一化登录配置字段名
- *
- * 后端 /Auth/LoginConfig 可能返回以下字段名变体：
- * - `oAuth`（C# 属性名 PascalCase 风格，首字母大写 O）→ 标准字段 `oauth`
- * - `providers`（v1 旧版字段名）→ 标准字段 `oauth`
- *
- * 归一化后确保 LoginConfig.oauth 始终有值（如果后端返回了的话）。
- * 该别名兼容由后端历史版本决定，基础库未做此处理，故保留在皮肤层。
- *
- * @param data 后端原始返回的 LoginConfig
- * @returns 归一化后的 LoginConfig
- */
-function normalizeLoginConfig(data: LoginConfig): LoginConfig {
-  // 浅拷贝，避免修改原始对象
-  const result: LoginConfig = { ...data };
-
-  // 用 Record 类型访问非标准字段名
-  const raw = data as Record<string, unknown>;
-
-  // 如果标准 oauth 字段为空，尝试从 oAuth / providers 补充
-  if (!result.oauth || result.oauth.length === 0) {
-    const oAuth = raw.oAuth as OAuthProvider[] | undefined;
-    if (oAuth && Array.isArray(oAuth) && oAuth.length > 0) {
-      result.oauth = oAuth;
-    } else if (result.providers && Array.isArray(result.providers) && result.providers.length > 0) {
-      // v1 旧版字段名 providers → oauth
-      result.oauth = result.providers;
-    }
-  }
-
-  return result;
-}
-
-// ── API 函数（全部委托 @newlifex/api-core 的 user 认证 API） ─────────
+// ── API 函数（全部委托 @newlifex/cube 的 user 认证 API） ─────────
 
 /**
  * 获取登录配置
  *
- * 委托 user.getLoginConfig 调用 GET /Auth/LoginConfig，返回系统名称、Logo、版权、
- * 登录/注册能力、OAuth 提供商列表、安全策略等。
+ * 委托 user.getLoginConfig 调用 GET /Auth/LoginConfig，返回登录/注册能力、
+ * OAuth 提供商列表、安全策略等。品牌、版权等站点信息由 /Cube/Site 返回。
  *
- * 返回前对 data 做字段名归一化（oAuth / providers → oauth），该别名兼容为基础库未覆盖，
- * 故保留在皮肤层（@newlifex/api-core 不含此逻辑）。
- *
+ * @param tenant 租户标识（编号/编码/名称），为空时取当前请求上下文
  * @returns 登录配置响应
  * @throws 网络错误或 HTTP 状态码非 200 时抛出异常
  */
-export async function fetchLoginConfig(): Promise<ApiResponse<LoginConfig>> {
-  const json = await user.getLoginConfig();
-  if (json?.data) {
-    json.data = normalizeLoginConfig(json.data);
-  }
-  return json;
+export async function fetchLoginConfig(tenant?: string): Promise<ApiResponse<LoginConfig>> {
+  return user.getLoginConfig(tenant);
+}
+
+/**
+ * 获取站点配置
+ *
+ * 委托 site.getSite 调用 GET /Cube/Site，返回站点名称、Logo、版权、语言与功能开关。
+ * 该接口匿名可访问，供登录页和前台页面使用。
+ *
+ * @param tenant 租户标识（编号/编码/名称），为空时取当前请求上下文
+ * @returns 站点配置响应
+ * @throws 网络错误或 HTTP 状态码非 200 时抛出异常
+ */
+export async function fetchSiteConfig(tenant?: string): Promise<ApiResponse<SiteConfig>> {
+  return site.getSite(tenant);
 }
 
 /**
  * 密码登录
  *
- * @deprecated 通用登录逻辑已下沉到 @newlifex/api-core（user.loginWithPassword，皮肤共用），
+ * @deprecated 通用登录逻辑已下沉到 @newlifex/cube（user.loginWithPassword，皮肤共用），
  * 本函数仅保留骨架兼容旧调用方式，勿再在核心逻辑处使用。新代码请直接调
  * cubeApi.user.loginWithPassword(username, password, { captchaId, captchaCode, remember })。
  *
@@ -193,4 +165,17 @@ export async function verifyContact(
   code: string,
 ): Promise<ApiResponse<VerifyStatus>> {
   return user.verifyContact({ channel, account, code });
+}
+
+/**
+ * 通过验证码重置密码（忘记密码流程）
+ *
+ * 委托 user.resetPassword 调用 POST /Auth/ResetPassword；新密码由 @newlifex/cube
+ * 先 GET /Auth/Challenge 取公钥加密后提交（服务端禁止明文密码时必需），Challenge 不可达时降级明文。
+ *
+ * @param data 重置参数（手机号或邮箱 / 验证码 / 新密码 / 确认密码）
+ * @returns 重置结果，code 为 0 表示成功
+ */
+export async function resetPassword(data: ResetPasswordModel): Promise<ApiResponse<boolean>> {
+  return user.resetPassword(data);
 }

@@ -1,4 +1,4 @@
-﻿# 第35章 快速开始（WebAPI版）
+# 第35章 快速开始（WebAPI版）
 
 > 本章介绍第三代魔方（WebAPI版）的快速入门，包括项目创建、配置和与 MVC 版的区别。
 
@@ -253,32 +253,33 @@ public class StudentController : EntityController<Student> { }
 ```javascript
 // 前端调用示例（JavaScript）
 
-// 1. 登录获取令牌
-const loginResult = await fetch('/api/user/login', {
+// 1. 登录获取令牌（服务端点不带 /api 前缀）
+const loginResult = await fetch('/Auth/Login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username: 'admin', password: '123456' })
 });
-const { accessToken } = await loginResult.json();
+const { data: login } = await loginResult.json();
+const token = login?.accessToken;
 
-// 2. 获取字段元数据
-const fieldsResult = await fetch('/api/student/getfields?kind=1', {
-    headers: { 'Authorization': `Bearer ${accessToken}` }
+// 2. 获取页面元数据（实体端点带 /api 与 Area）
+const metaResult = await fetch('/api/School/Student/meta', {
+    headers: { 'Authorization': `Bearer ${token}` }
 });
-const fields = await fieldsResult.json();
+const { data: meta } = await metaResult.json();
 
 // 3. 获取数据列表
-const listResult = await fetch('/api/student?pageIndex=1&pageSize=20', {
-    headers: { 'Authorization': `Bearer ${accessToken}` }
+const listResult = await fetch('/api/School/Student?pageIndex=1&pageSize=20', {
+    headers: { 'Authorization': `Bearer ${token}` }
 });
 const { data, page } = await listResult.json();
 
 // 4. 添加数据
-const addResult = await fetch('/api/student', {
+const addResult = await fetch('/api/School/Student', {
     method: 'POST',
     headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`
+        'Authorization': `Bearer ${token}`
     },
     body: JSON.stringify({ name: '张三', classId: 1 })
 });
@@ -342,13 +343,12 @@ app.Run();
 ```csharp
 using NewLife.Cube;
 using NewLife.Web;
-using XCode.Membership;
 
 namespace CubeDemo.Areas.School.Controllers;
 
+// Area 特性提供 /api/{area}/{controller} 的路由段与菜单归属；
+// 路由与 [ApiController] 由基类 ControllerBaseX 统一提供，无需重复声明
 [SchoolArea]
-[Route("api/school/[controller]")]
-[ApiController]
 public class StudentController : EntityController<Student>
 {
     static StudentController()
@@ -356,12 +356,12 @@ public class StudentController : EntityController<Student>
         ListFields.RemoveField("Password", "Remark");
         ListFields.AddField("ClassName", "ClassId");
     }
-    
+
     protected override IEnumerable<Student> Search(Pager p)
     {
         var classId = p["classId"].ToInt(-1);
         var name = p["Q"];
-        
+
         return Student.Search(classId, name, p);
     }
 }
@@ -387,43 +387,46 @@ dotnet run
 
 ## 35.7 认证与授权
 
-### JWT 认证
+### 登录接口
 
-```csharp
-// WebAPI 版默认使用 JWT 认证
+服务控制器（`Auth`/`Sso`）由 `[Route("[controller]/[action]")]` 暴露，**不带 `/api` 前缀**：
 
-// 登录接口
-[HttpPost("login")]
-public ActionResult Login([FromBody] LoginModel model)
-{
-    var result = _userService.Login(model, HttpContext);
-    return Json(result);
-    // 返回：{ accessToken: "xxx", refreshToken: "xxx" }
-}
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/Auth/Login` | POST | 用户名密码登录，返回访问令牌与刷新令牌 |
+| `/Auth/Refresh` | POST | 用刷新令牌换取新的访问令牌 |
+| `/Auth/LoginConfig` | GET | 登录页配置（是否允许密码/短信/邮件登录等） |
 
-// 需要认证的接口
-[EntityAuthorize(PermissionFlags.Detail)]
-[HttpGet]
-public ActionResult Index(Pager p)
-{
-    // 需要携带 Authorization: Bearer {token}
-    var list = Search(p);
-    return Json(0, null, list, new { page = p });
-}
-```
+登录结果放在 `data` 里，字段为 `accessToken` / `refreshToken`（响应格式见 [WebAPI接口规范](WebAPI接口规范.md) 36.3）。
 
 ### 令牌传递方式
 
-```csharp
-// 1. Header 方式（推荐）
+令牌来源依次为 `Authorization`、`X-Token`、`?token=`、`?jwtToken=` 与 Cookie `token-{系统名}`，401/403 报文格式统一见 [WebAPI接口规范](WebAPI接口规范.md) 36.9。最常用的是请求头：
+
+```http
 Authorization: Bearer {token}
-
-// 2. Query 方式
-/api/student?token={token}
-
-// 3. Cookie 方式
-Cookie: Token={token}
+X-Token: {token}
 ```
+
+只接受三段式 JWT；`X-Token`、query 令牌与 Cookie 仅作兼容，新代码统一用 `Authorization` 头。
+
+### 需要认证的接口
+
+实体控制器基类已内置权限校验，业务代码只需继承 `EntityController<T>` 并重写 `Search`：
+
+```csharp
+// 基类已按 PermissionFlags.Detail 校验权限，无需重复标注
+public class StudentController : EntityController<Student>
+{
+    protected override IEnumerable<Student> Search(Pager p)
+    {
+        var classId = p["classId"].ToInt(-1);
+        return Student.Search(classId, p["Q"], p);
+    }
+}
+```
+
+完整路由、响应信封、错误码与异常边界见 [WebAPI接口规范](WebAPI接口规范.md)。
 
 ---
 

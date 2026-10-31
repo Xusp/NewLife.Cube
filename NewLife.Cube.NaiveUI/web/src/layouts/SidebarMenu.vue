@@ -2,7 +2,7 @@
   <n-menu
     :options="menuOptions"
     :value="activeKey"
-    :collapsed="appStore.collapsed"
+    :collapsed="collapsedState"
     :collapsed-width="64"
     :collapsed-icon-size="20"
     @update:value="handleSelect"
@@ -10,17 +10,21 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, h, type Component as VueComponent } from 'vue';
+import { computed, ref, onMounted, h, type Component as VueComponent } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { NIcon, type MenuOption } from 'naive-ui';
 import { useAppStore } from '@/stores/app';
 import { useUserStore } from '@/stores/user';
-import type { MenuItem } from '@newlifex/api-core';
+import type { MenuItem } from '@newlifex/cube';
 
 const route = useRoute();
 const router = useRouter();
 const appStore = useAppStore();
 const userStore = useUserStore();
+
+/** 移动端抽屉固定展开；未传时跟随全局折叠状态 */
+const props = withDefaults(defineProps<{ collapsed?: boolean }>(), { collapsed: undefined });
+const collapsedState = computed(() => props.collapsed ?? appStore.collapsed);
 
 const menuOptions = ref<MenuOption[]>([]);
 const activeKey = ref<string>('');

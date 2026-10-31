@@ -8,15 +8,18 @@
  *        → 后端返回 { code:0, message:null, data:{ attId, filePath, contentType } }
  *        → 将 data.filePath 回写 modelValue。
  *
- * 上传地址解析（与 GetPage 一致，跟随路由动态推导）：
- *   - 传入 apiPrefix（如 /Device/DeviceProfile）时，使用 `${apiPrefix}/UploadFile`（默认接口）
+ * 上传地址解析（与 meta 一致，跟随路由动态推导）：
+ *   - 传入 apiPrefix（如 /Device/DeviceProfile）时，使用 `${apiPrefix}/attachments`（默认接口）
  *   - 未传入 apiPrefix 时，回退到显式 action（默认 /api/Test/TestUpload/Upload）以保证旧用法兼容
  */
 import { ref, computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { ElMessage } from 'element-plus';
 import type { UploadRequestOptions, UploadProps } from 'element-plus';
 import request from '../utils/request';
 import { resolveAssetUrl } from '../utils/url';
+
+const { t } = useI18n();
 
 const props = withDefaults(
   defineProps<{
@@ -44,11 +47,11 @@ const uploading = ref(false);
 
 /**
  * 实际上传地址：
- *   - 传入 apiPrefix 时动态拼接默认上传接口 `${apiPrefix}/UploadFile`；
+ *   - 传入 apiPrefix 时动态拼接默认上传接口 `${apiPrefix}/attachments`；
  *   - 否则回退到显式 action（默认 /api/Test/TestUpload/Upload）以兼容旧用法。
  */
 const uploadUrl = computed(() => {
-  if (props.apiPrefix) return `${props.apiPrefix}/UploadFile`;
+  if (props.apiPrefix) return `${props.apiPrefix}/attachments`;
   return props.action;
 });
 
@@ -67,7 +70,7 @@ const displayUrl = computed(() => resolveAssetUrl(props.modelValue));
 /** 上传前校验（图片类型） */
 const beforeUpload: UploadProps['beforeUpload'] = (rawFile) => {
   if (isImage.value && !(rawFile as File).type.startsWith('image/')) {
-    ElMessage.error('只能上传图片文件');
+    ElMessage.error(t('uploader.onlyImage'));
     return false;
   }
   return true;
@@ -86,15 +89,15 @@ async function customUpload(options: UploadRequestOptions) {
     // 兼容两种形态：拦截器返回完整 ApiResponse（res.data 为内层）或直接返回内层对象
     const apiRes = res?.data !== undefined ? res : { data: res };
     if (apiRes.code !== undefined && apiRes.code !== 0 && apiRes.code !== 200) {
-      throw new Error(apiRes.message || '上传失败');
+      throw new Error(apiRes.message || t('uploader.uploadFailed'));
     }
     const data = apiRes.data ?? {};
     const filePath = data?.filePath ?? '';
-    if (!filePath) throw new Error('上传成功但未返回文件地址');
+    if (!filePath) throw new Error(t('uploader.noFileUrl'));
     emit('update:modelValue', filePath);
     options.onSuccess?.(data);
   } catch (err: any) {
-    const msg = err?.message || '上传失败';
+    const msg = err?.message || t('uploader.uploadFailed');
     ElMessage.error(msg);
     options.onError?.(err);
   } finally {
@@ -113,7 +116,7 @@ function clearFile() {
     <div v-if="isImage && modelValue" class="uploader__preview">
       <img :src="displayUrl" :alt="fileName" class="uploader__img" />
       <el-button size="small" text type="danger" :disabled="disabled" @click="clearFile">
-        移除
+        {{ t('uploader.remove') }}
       </el-button>
     </div>
 
@@ -123,7 +126,7 @@ function clearFile() {
         {{ fileName }}
       </el-link>
       <el-button size="small" text type="danger" :disabled="disabled" @click="clearFile">
-        移除
+        {{ t('uploader.remove') }}
       </el-button>
     </div>
 
@@ -136,7 +139,7 @@ function clearFile() {
       class="uploader__btn"
     >
       <el-button :loading="uploading" :disabled="disabled">
-        {{ uploading ? '上传中...' : isImage ? '上传图片' : '上传文件' }}
+        {{ uploading ? t('uploader.uploading') : isImage ? t('uploader.uploadImage') : t('uploader.uploadFile') }}
       </el-button>
     </el-upload>
   </div>

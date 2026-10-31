@@ -149,9 +149,9 @@ public class RunTimeMiddleware
             var uri = HttpExtensions.GetRawUrl(ctx.Request);
             online?.SetError(ex.Message);
 
-            XTrace.Log.Error("[{0}]的错误[{1}] {2}", uri, ip, ctx.TraceIdentifier);
+            XTrace.Log.Error("[{0}] error [{1}] {2}", uri, ip, ctx.TraceIdentifier);
 
-            LogProvider.Provider?.WriteLog("访问", "错误", false, ex.Message + " " + uri + Environment.NewLine + ex.GetMessage(), user?.ID ?? 0, user + "", ip);
+            LogProvider.Provider?.WriteLog(L.T("Access"), L.T("Error"), false, ex.Message + " " + uri + Environment.NewLine + ex.GetMessage(), user?.ID ?? 0, user + "", ip);
 
             XTrace.WriteException(ex);
 
@@ -178,7 +178,7 @@ public class RunTimeMiddleware
     }
 
     /// <summary>执行时间字符串</summary>
-    public static String DbRunTimeFormat { get; set; } = "查询{0}次，执行{1}次，耗时{2:n0}毫秒";
+    public static String DbRunTimeFormat { get; set; } = "Queries {0}, executes {1}, elapsed {2:n0} ms";
 
     /// <summary>获取执行时间和查询次数等信息</summary>
     /// <param name="ctx"></param>

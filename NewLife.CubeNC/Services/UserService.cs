@@ -117,25 +117,25 @@ public class UserService(PasswordService passwordService, ICacheProvider cachePr
         // 防止攻击者绕过登录页直接调用登录接口。本方法是 MVC 版与 API 版共用的账密登录汇聚点
         // （Auth/Login、Admin/User/Login 均汇聚到此），统一在此拦截即可覆盖全部密码登录入口
         if (!set.AllowLogin)
-            throw new InvalidOperationException("已禁止密码登录，请使用 SSO 或其它登录方式");
+            throw new InvalidOperationException(L.T("Password sign-in is disabled. Please use SSO or another sign-in method."));
 
         try
         {
-            if (username.IsNullOrEmpty()) throw new ArgumentNullException(nameof(username), "用户名不能为空！");
-            if (password.IsNullOrEmpty()) throw new ArgumentNullException(nameof(password), "密码不能为空！");
+            if (username.IsNullOrEmpty()) throw new ArgumentNullException(nameof(username), L.T("Username is required."));
+            if (password.IsNullOrEmpty()) throw new ArgumentNullException(nameof(password), L.T("Password is required."));
 
             if (errors >= set.MaxLoginError && set.MaxLoginError > 0)
-                throw new InvalidOperationException($"[{username}]登录错误过多，请在{set.LoginForbiddenTime}秒后再试！");
+                throw new InvalidOperationException(L.T("Too many sign-in attempts for [{0}]. Please try again in {1} seconds.", username, set.LoginForbiddenTime));
             if (ipErrors >= set.MaxLoginError && set.MaxLoginError > 0)
-                throw new InvalidOperationException($"IP地址[{ip}]登录错误过多，请在{set.LoginForbiddenTime}秒后再试！");
+                throw new InvalidOperationException(L.T("Too many sign-in attempts for IP address [{0}]. Please try again in {1} seconds.", ip, set.LoginForbiddenTime));
             if (!ip24Key.IsNullOrEmpty() && ip24Errors >= set.MaxLoginErrorBySubnet24 && set.MaxLoginErrorBySubnet24 > 0)
-                throw new InvalidOperationException($"IP段[{ip24}.*]登录错误过多，请在{set.LoginForbiddenTime}秒后再试！");
+                throw new InvalidOperationException(L.T("Too many sign-in attempts for IP range [{0}]. Please try again in {1} seconds.", ip24 + ".*", set.LoginForbiddenTime));
             if (!ip16Key.IsNullOrEmpty() && ip16Errors >= set.MaxLoginErrorBySubnet16 && set.MaxLoginErrorBySubnet16 > 0)
-                throw new InvalidOperationException($"IP段[{ip16}.*.*]登录错误过多，请在{set.LoginForbiddenTime}秒后再试！");
+                throw new InvalidOperationException(L.T("Too many sign-in attempts for IP range [{0}]. Please try again in {1} seconds.", ip16 + ".*.*", set.LoginForbiddenTime));
 
             // 安全登录检查：若禁止明文密码且未携带挑战标识，则拒绝
             if (loginModel.ChallengeId.IsNullOrEmpty() && !set.AllowPlainPassword)
-                throw new InvalidOperationException("禁止明文传输密码，请先调用 GET /Auth/Challenge 获取公钥进行加密登录");
+                throw new InvalidOperationException(L.T("Plain-text password transmission is not allowed. Please obtain the public key and encrypt first."));
 
             // 携带 challengeId 时必须能取到私钥；取不到（过期/伪造）时明确报错，
             // 避免把密文当明文密码验证，导致"密码不正确"掩盖密钥过期根因
@@ -144,7 +144,7 @@ public class UserService(PasswordService passwordService, ICacheProvider cachePr
                 var pdic = _cache.Get<Tuple<String, String>>(loginModel.ChallengeId);
                 var rsaKey = pdic?.Item2;
                 if (rsaKey.IsNullOrEmpty())
-                    throw new InvalidOperationException("登录挑战已过期或无效，请重新获取公钥后重试");
+                    throw new InvalidOperationException(L.T("The login challenge has expired or is invalid. Please obtain the public key again and retry."));
                 password = DecryptByPrivateKey(rsaKey, password);
             }
 
@@ -154,12 +154,12 @@ public class UserService(PasswordService passwordService, ICacheProvider cachePr
                 // 未激活账号（需邮箱/手机验证注册）：明确提示而非"密码错误"，前端据此提供重发激活入口
                 var u = User.FindByName(username) ?? User.FindByMail(username) ?? User.FindByMobile(username);
                 if (u != null && !u.Enable)
-                    return new ServiceResult<IToken> { IsSuccess = false, Message = "账号未激活，请先通过邮箱/手机激活后登录" };
+                    return new ServiceResult<IToken> { IsSuccess = false, Message = L.T("The account is not activated. Please activate it via email or mobile before signing in.") };
 
                 // 本地验证失败，尝试外部验证服务
                 var extUser = ExternalAuthHelper.Validate(username, password, set.ExternalAuthUrl);
                 if (extUser == null)
-                    return new ServiceResult<IToken> { IsSuccess = false, Message = "提供的用户名或密码不正确。" };
+                    return new ServiceResult<IToken> { IsSuccess = false, Message = L.T("Incorrect username or password!") };
 
                 // 外部验证成功，创建或更新本地用户
                 var extLocalUser = ExternalAuthHelper.CreateOrUpdateUser(extUser, ip, set);
@@ -232,7 +232,7 @@ public class UserService(PasswordService passwordService, ICacheProvider cachePr
             userSource.SaveAsync();
         }
 
-        LogProvider.Provider.WriteLog(typeof(User), action, true, $"用户：{username}" + (source.IsNullOrEmpty() ? "" : $" 来源：{source}"), user.ID, user + "", ip);
+        LogProvider.Provider.WriteLog(typeof(User), action, true, L.TLog("User: {0}", username) + (source.IsNullOrEmpty() ? "" : L.TLog(" (source: {0})", source)), user.ID, user + "", ip);
 
         // MFA 拦截：须用库中最新 User（含 Ex4/Ex5/Ex6），避免会话对象无持久化扩展字段
         if (set.EnableMfa && _mfa != null)
@@ -249,6 +249,11 @@ public class UserService(PasswordService passwordService, ICacheProvider cachePr
                 };
             }
         }
+
+        // 单设备模式：新登录踢掉旧设备，确保同一账号仅保留当前会话。必须在 MFA 拦截之后执行，
+        // 否则用户未完成二步验证就已把其他设备踢下线；若本次请求已提前颁发令牌（密码登录管线），
+        // 说明踢机已在其颁发前完成，此处跳过以免吊销刚签发的会话
+        if (!set.EnableMultiDeviceLogin && user.ID > 0 && httpContext.Items["jwtToken"] == null) UserToken.RevokeByUser(user.ID);
 
         // 先颁发令牌，JWT 缓存在 context.Items["jwtToken"]
         // 记住登录状态（Remember）：JWT 有效期与 Cookie 一致延长到 365 天，
@@ -296,7 +301,7 @@ public class UserService(PasswordService passwordService, ICacheProvider cachePr
         // 已属于其它租户的用户不自动自建加入，防止带可猜编码的水平越权；多租户归属走显式管理动作。
         if (TenantUser.FindAllByUserId(userId).Any(e => e.Enable))
         {
-            XTrace.WriteLine("[TenantBind] 用户[{0}]已有有效租户归属，拒绝自动绑定到租户[{1}]", userId, tenantId);
+            XTrace.WriteLine(L.TLog("[TenantBind] user [{0}] already has a valid tenant, refuse to auto-bind to tenant [{1}]", userId, tenantId));
             return null;
         }
 
@@ -314,8 +319,8 @@ public class UserService(PasswordService passwordService, ICacheProvider cachePr
         tenantUser.Insert();
 
         // 审计：自动绑定租户（规则B），写入审计日志便于追溯自建绑定行为（P2-5）
-        XTrace.WriteLine($"[{userId}]用户自动绑定到租户[{tenantId}]");
-        LogProvider.Provider.WriteLog(typeof(TenantUser), "自动绑定", true, $"用户[{userId}]自动绑定到租户[{tenantId}]", userId, userId + "", ip);
+        XTrace.WriteLine(L.TLog("[{0}] user auto-bound to tenant [{1}]", userId, tenantId));
+        LogProvider.Provider.WriteLog(typeof(TenantUser), L.TLog("Auto bind"), true, L.TLog("User [{0}] auto-bound to tenant [{1}]", userId, tenantId), userId, userId + "", ip);
         return tenantUser;
     }
 
@@ -324,7 +329,7 @@ public class UserService(PasswordService passwordService, ICacheProvider cachePr
     {
         var logAction = ex is InvalidOperationException ? "风控" : action;
         LogProvider.Provider.WriteLog(typeof(User), logAction, false, ex.Message, 0, username, ip);
-        XTrace.WriteLine("[{0}]{1}失败！{2}", username, action, ex.Message);
+        XTrace.WriteLine(L.TLog("[{0}] {1} failed! {2}", username, action, ex.Message));
 
         // 累加错误数，首次出错时设置过期时间
         _cache.Increment(key, 1);
@@ -420,8 +425,8 @@ public class UserService(PasswordService passwordService, ICacheProvider cachePr
     public ServiceResult<IToken> Register(AuthRegisterModel model, HttpContext httpContext)
     {
         var set = CubeSetting.Current;
-        if (!set.AllowRegister) return new ServiceResult<IToken> { IsSuccess = false, Message = "禁止注册" };
-        if (model == null) return new ServiceResult<IToken> { IsSuccess = false, Message = "注册参数不能为空" };
+        if (!set.AllowRegister) return new ServiceResult<IToken> { IsSuccess = false, Message = L.T("Registration is disabled.") };
+        if (model == null) return new ServiceResult<IToken> { IsSuccess = false, Message = L.T("Registration parameters are required.") };
 
         // 租户识别：优先X-App-Id（参考SSO登录按AppId查找OAuth配置取租户），其次X-Tenant租户编码；均未传时不强制，沿用原逻辑
         var tenantError = httpContext.ResolveRegisterTenant();
@@ -455,7 +460,7 @@ public class UserService(PasswordService passwordService, ICacheProvider cachePr
         if (!check.IsSuccess) return new ServiceResult<IToken> { IsSuccess = false, Message = check.Message };
 
         if (username.IsNullOrEmpty())
-            return new ServiceResult<IToken> { IsSuccess = false, Message = "用户名不能为空" };
+            return new ServiceResult<IToken> { IsSuccess = false, Message = L.T("Username is required.") };
 
         var duplicate = CheckDuplicate(username, email, mobile);
         if (!duplicate.IsSuccess) return new ServiceResult<IToken> { IsSuccess = false, Message = duplicate.Message };
@@ -467,12 +472,12 @@ public class UserService(PasswordService passwordService, ICacheProvider cachePr
     internal ServiceResult<IToken> RegisterByOAuthBind(AuthRegisterModel model, HttpContext httpContext, String ip)
     {
         if (model.OAuthToken.IsNullOrEmpty())
-            return new ServiceResult<IToken> { IsSuccess = false, Message = "OAuth回跳令牌不能为空" };
+            return new ServiceResult<IToken> { IsSuccess = false, Message = L.T("OAuth callback token is required.") };
 
         var pendingKey = $"{OAuthPendingPrefix}{model.OAuthToken}";
         var pending = _cache.Get<OAuthPendingInfoModel>(pendingKey);
         if (pending == null)
-            return new ServiceResult<IToken> { IsSuccess = false, Message = "OAuth回跳信息已过期，请重新发起第三方登录" };
+            return new ServiceResult<IToken> { IsSuccess = false, Message = L.T("OAuth callback information has expired. Please start the third-party sign-in again.") };
 
         // 密码可选：留空则生成随机密码（三方登录用户无需密码，登录后可再设置）
         var pwd = ResolveRegisterPassword(model);
@@ -505,26 +510,26 @@ public class UserService(PasswordService passwordService, ICacheProvider cachePr
 
         var oauthId = httpContext.Session?.GetString("Cube_OAuthId").ToLong() ?? 0;
         if (oauthId <= 0)
-            return new ServiceResult<IToken> { IsSuccess = false, Message = "OAuth绑定会话已过期，请重新发起第三方登录" };
+            return new ServiceResult<IToken> { IsSuccess = false, Message = L.T("OAuth binding session has expired. Please start the third-party sign-in again.") };
 
         var log = bindingService.BindAfterLogin(oauthId);
         if (log == null)
-            return new ServiceResult<IToken> { IsSuccess = false, Message = "OAuth绑定失败，请重新发起第三方登录" };
+            return new ServiceResult<IToken> { IsSuccess = false, Message = L.T("Binding failed. Please try again.") };
 
         httpContext.Session.Remove("Cube_OAuthId");
         _cache.Remove(pendingKey);
 
-        LogProvider.Provider.WriteLog(typeof(User), "OAuth回跳注册", true, $"提供商：{pending.Provider}", user.ID, user + "", ip);
+        LogProvider.Provider.WriteLog(typeof(User), L.TLog("OAuth callback registration"), true, L.TLog("Provider: {0}", pending.Provider), user.ID, user + "", ip);
 
         return result;
     }
 
     internal ServiceResult ValidatePasswordAndConfirm(String password, String confirmPassword)
     {
-        if (password.IsNullOrEmpty()) return new ServiceResult { IsSuccess = false, Message = "密码不能为空" };
-        if (confirmPassword.IsNullOrEmpty()) return new ServiceResult { IsSuccess = false, Message = "确认密码不能为空" };
-        if (password != confirmPassword) return new ServiceResult { IsSuccess = false, Message = "两次输入密码不一致" };
-        if (!passwordService.Valid(password)) return new ServiceResult { IsSuccess = false, Message = "密码太弱" };
+        if (password.IsNullOrEmpty()) return new ServiceResult { IsSuccess = false, Message = L.T("Password is required.") };
+        if (confirmPassword.IsNullOrEmpty()) return new ServiceResult { IsSuccess = false, Message = L.T("Confirm password is required.") };
+        if (password != confirmPassword) return new ServiceResult { IsSuccess = false, Message = L.T("The two passwords do not match.") };
+        if (!passwordService.Valid(password)) return new ServiceResult { IsSuccess = false, Message = L.T("Password is too weak.") };
 
         return new ServiceResult { IsSuccess = true };
     }
@@ -550,13 +555,13 @@ public class UserService(PasswordService passwordService, ICacheProvider cachePr
     internal ServiceResult CheckDuplicate(String username, String email, String mobile)
     {
         if (!username.IsNullOrEmpty() && User.FindByName(username) != null)
-            return new ServiceResult { IsSuccess = false, Message = $"用户[{username}]已存在" };
+            return new ServiceResult { IsSuccess = false, Message = L.T("User [{0}] already exists.", username) };
 
         if (!email.IsNullOrEmpty() && User.FindByMail(email) != null)
-            return new ServiceResult { IsSuccess = false, Message = $"邮箱[{email}]已存在" };
+            return new ServiceResult { IsSuccess = false, Message = L.T("Email [{0}] already exists.", email) };
 
         if (!mobile.IsNullOrEmpty() && User.FindByMobile(mobile) != null)
-            return new ServiceResult { IsSuccess = false, Message = $"手机号[{mobile}]已存在" };
+            return new ServiceResult { IsSuccess = false, Message = L.T("Mobile number [{0}] already exists.", mobile) };
 
         return new ServiceResult { IsSuccess = true };
     }
@@ -578,7 +583,7 @@ public class UserService(PasswordService passwordService, ICacheProvider cachePr
         foreach (var item in OAuthConfig.GetValids(_tenantContext.TenantId))
         {
             if (username.StartsWithIgnoreCase($"{item.Name}_"))
-                throw new ArgumentException($"禁止使用[{item.Name}_]前缀！", nameof(username));
+                throw new ArgumentException(L.T("The prefix [{0}_] is not allowed.", item.Name), nameof(username));
         }
 
         var role = Role.GetOrAdd(set.DefaultRole);
@@ -586,7 +591,7 @@ public class UserService(PasswordService passwordService, ICacheProvider cachePr
         provider.Register(username, password, role?.ID ?? 0, enable);
 
         var user = provider.FindByName(username) as User ?? User.FindByName(username);
-        if (user == null) throw new InvalidOperationException("注册失败，请稍后重试");
+        if (user == null) throw new InvalidOperationException(L.T("Registration failed. Please try again later."));
 
         var changed = false;
         // 只有经过验证码校验的联系方式才标记为已验证（mailVerified/mobileVerified 由各注册路径传入），
@@ -641,24 +646,26 @@ public class UserService(PasswordService passwordService, ICacheProvider cachePr
 
         if (user == null || user.ID <= 0) return new ServiceResult { IsSuccess = false, Message = "用户未登录" };
 
-        // 注销脱敏前快照，供处理器定位并清理个人数据
-        var entity0 = User.FindByID(user.ID);
+        // 注销脱敏前快照，供处理器定位并清理个人数据。走 SQL 查询，避免单对象缓存返回陈旧副本
+        var entity0 = User.Find(User._.ID == user.ID);
         IUser snapshot = entity0?.CloneEntity();
 
         // 调用所有处理器清理个人数据。全部尽力而为，单个失败不影响其它处理器
         InvokeCloseHandlers(snapshot ?? user, ip);
 
-        // 兜底禁用账号：不依赖任何处理器，确保注销后无法登录
-        var entity = User.FindByID(user.ID);
+        // 兜底禁用账号：不依赖任何处理器，确保注销后无法登录。
+        // 从数据库重新加载，避免单对象缓存中的陈旧实体把处理器已脱敏的字段写回
+        var entity = User.Find(User._.ID == user.ID);
         if (entity != null)
         {
             entity.Enable = false;
             entity.Update();
         }
+        User.Meta.SingleCache.Clear("账号注销");
 
-        LogProvider.Provider.WriteLog(typeof(User), "注销账号", true, $"用户：{user}", user.ID, user + "", ip);
+        LogProvider.Provider.WriteLog(typeof(User), L.TLog("Close account"), true, L.TLog("User: {0}", user), user.ID, user + "", ip);
 
-        return new ServiceResult { IsSuccess = true, Message = "账号已注销" };
+        return new ServiceResult { IsSuccess = true, Message = L.T("Account closed.") };
     }
 
     /// <summary>逐个调用账号注销处理器。全部尽力而为，单个异常被隔离记录；处理器必须按 Singleton 注册</summary>
@@ -681,7 +688,7 @@ public class UserService(PasswordService passwordService, ICacheProvider cachePr
             catch (Exception ex)
             {
                 span?.SetError(ex, null);
-                XTrace.WriteLine("[CloseAccount] 处理器 {0} 清理失败（用户 {1}）：{2}", handler.GetType().FullName, user?.ID, ex.Message);
+                XTrace.WriteLine(L.TLog("[CloseAccount] handler {0} failed to clean up (user {1}): {2}", handler.GetType().FullName, user?.ID, ex.Message));
                 XTrace.WriteException(ex);
             }
         }

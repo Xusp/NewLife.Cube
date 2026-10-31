@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="language-switch">
     <el-dropdown @command="handleCommand">
       <span class="el-dropdown-link">
@@ -26,22 +26,24 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { ArrowDown } from '@element-plus/icons-vue';
-import { getCurrentLanguage, setLanguage } from '../i18n';
+import { getCurrentLanguage, setLanguage, supportedLanguages } from '../i18n';
 
 defineOptions({
   name: 'LanguageSwitch',
 });
 
-const languages = [
-  { label: '中文', value: 'zh-CN' },
-  { label: 'English', value: 'en-US' },
-];
+const emit = defineEmits<{
+  /** 语言切换完成事件，供调用方刷新服务端本地化文本 */
+  change: [language: string];
+}>();
+
+const languages = supportedLanguages;
 
 const currentLanguage = ref(getCurrentLanguage());
 
 const currentLanguageLabel = computed(() => {
   const lang = languages.find((item) => item.value === currentLanguage.value);
-  return lang ? lang.label : '中文';
+  return lang ? lang.label : currentLanguage.value;
 });
 
 // 处理语言切换
@@ -49,6 +51,7 @@ function handleCommand(command: typeof currentLanguage.value) {
   if (command !== currentLanguage.value) {
     currentLanguage.value = command;
     setLanguage(command);
+    emit('change', command);
   }
 }
 </script>

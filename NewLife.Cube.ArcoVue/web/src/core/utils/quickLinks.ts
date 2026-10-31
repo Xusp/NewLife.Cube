@@ -1,4 +1,4 @@
-import type { MenuItem } from '@newlifex/api-core';
+import type { MenuItem } from '@newlifex/cube';
 import { flattenMenus } from './menuRoutes';
 import { resolveWorkbenchIcon } from './workbench';
 

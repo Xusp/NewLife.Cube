@@ -117,7 +117,7 @@ public static class ExternalAuthHelper
             }
 
             user.Insert();
-            LogProvider.Provider?.WriteLog(typeof(User), "外部验证注册", true, $"用户：{extUser.UserName}", user.ID, user + "", ip);
+            LogProvider.Provider?.WriteLog(typeof(User), L.TLog("External sign-up"), true, L.TLog("User: {0}", extUser.UserName), user.ID, user + "", ip);
         }
         else
         {
@@ -151,7 +151,7 @@ public static class ExternalAuthHelper
             if (dirty) user.Update();
         }
 
-        if (!user.Enable) throw new InvalidOperationException($"用户[{user.Name}]已禁用");
+        if (!user.Enable) throw new InvalidOperationException(L.T("User [{0}] is disabled.", user.Name));
 
         return user;
     }

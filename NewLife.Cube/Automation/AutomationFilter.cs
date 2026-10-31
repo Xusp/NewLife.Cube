@@ -16,14 +16,14 @@ public static class AutomationFilter
     public static ViewFilterDto ParseViewFilter(String viewFilter)
     {
         if (viewFilter.IsNullOrEmpty()) return null;
-        if (viewFilter.Length > 4096) throw new ApiException(400, "筛选条件过长");
+        if (viewFilter.Length > 4096) throw new ApiException(400, "Filter condition is too long");
         try
         {
             return JsonNode.Parse(viewFilter).DeserializeFilter();
         }
         catch
         {
-            throw new ApiException(400, "筛选条件无效");
+            throw new ApiException(400, "Invalid filter condition");
         }
     }
 
@@ -36,15 +36,15 @@ public static class AutomationFilter
     {
         if (fact == null || filter?.Conditions == null || filter.Conditions.Count == 0) return null;
         // 复杂度上限（OSC-260830a1b2）：与白名单无关，恒生效
-        if (filter.Conditions.Count > 10) throw new ApiException(400, "筛选条件过多");
+        if (filter.Conditions.Count > 10) throw new ApiException(400, "Too many filter conditions");
         var any = (filter.Logic + "").EqualIgnoreCase("any");
-        if (any && filter.Conditions.Count > 5) throw new ApiException(400, "OR 条件过多");
+        if (any && filter.Conditions.Count > 5) throw new ApiException(400, "Too many OR conditions");
         Expression exp = null;
         foreach (var c in filter.Conditions)
         {
             // 字段白名单（OSC-260830a1b2）：未下发字段 → 400，不静默放弃，防止布尔侧信道伪造
             if (allowedField != null && !allowedField(c.Field))
-                throw new ApiException(400, "筛选条件含未授权字段");
+                throw new ApiException(400, "Filter condition contains unauthorized fields");
             var piece = TryBuildCondition(fact, c);
             if (piece == null) return null;
             exp = exp == null ? piece : (any ? (exp | piece) : (exp & piece));
@@ -124,12 +124,12 @@ public static class AutomationFilter
     static void ValidateFilter(ViewFilterDto filter, Func<String, Boolean>? allowedField)
     {
         if (filter?.Conditions == null || filter.Conditions.Count == 0) return;
-        if (filter.Conditions.Count > 10) throw new ApiException(400, "筛选条件过多");
-        if ((filter.Logic + "").EqualIgnoreCase("any") && filter.Conditions.Count > 5) throw new ApiException(400, "OR 条件过多");
+        if (filter.Conditions.Count > 10) throw new ApiException(400, "Too many filter conditions");
+        if ((filter.Logic + "").EqualIgnoreCase("any") && filter.Conditions.Count > 5) throw new ApiException(400, "Too many OR conditions");
         if (allowedField == null) return;
         foreach (var c in filter.Conditions)
         {
-            if (!allowedField(c.Field)) throw new ApiException(400, "筛选条件含未授权字段");
+            if (!allowedField(c.Field)) throw new ApiException(400, "Filter condition contains unauthorized fields");
         }
     }
 

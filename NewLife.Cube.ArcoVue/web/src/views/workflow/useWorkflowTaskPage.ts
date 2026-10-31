@@ -1,5 +1,5 @@
 import { ref } from 'vue';
-import type { WorkflowTaskItem } from '@newlifex/api-core';
+import type { WorkflowTaskItem } from '@newlifex/cube';
 import cubeApi from '@/api';
 import { useWorkflowTaskList } from './useWorkflowTaskList';
 import { wfIdOf, type WfId } from './useWorkflowProgress';

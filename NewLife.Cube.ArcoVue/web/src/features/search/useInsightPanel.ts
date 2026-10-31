@@ -1,5 +1,5 @@
 import { computed, provide, reactive, watch } from 'vue';
-import { emptyDashboard, type DashboardConfig, type WidgetInstance } from '@newlifex/api-core';
+import { emptyDashboard, type DashboardConfig, type WidgetInstance } from '@newlifex/cube';
 import { useUserStore } from '@/stores/user';
 import { useViewProfileStore } from '@/stores/viewProfile';
 import type { FieldMeta } from '@/core/types/field';

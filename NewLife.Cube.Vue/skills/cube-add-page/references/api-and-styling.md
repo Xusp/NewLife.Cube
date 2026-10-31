@@ -127,11 +127,11 @@ static ProductController()
 
 自定义页面中可通过 `usePageApi(area, controller)` composable 快速对接后端 CRUD API。
 
-> **前提**：前端项目需在 `package.json` 中添加 `"@newlifex/api-core": "workspace:*"` 依赖。
+> **前提**：前端项目需在 `package.json` 中添加 `"@newlifex/cube": "workspace:*"` 依赖。
 
 ### 全局 API 实例
 
-框架提供全局 `cubeApi` 实例（位于 `src/cubeApi.ts`），基于 `@newlifex/api-core` 的 `createCubeApi()` 创建，自动处理 Token 注入、401 跳转、响应拦截、字段名归一化等。
+框架提供全局 `cubeApi` 实例（位于 `src/cubeApi.ts`），基于 `@newlifex/cube` 的 `createCubeApi()` 创建，自动处理 Token 注入、401 跳转、响应拦截、字段名归一化等。
 
 ### 通用 CRUD Composable
 
@@ -139,18 +139,17 @@ static ProductController()
 
 | 方法                   | 功能                                 | 对应后端接口                            |
 | ---------------------- | ------------------------------------ | --------------------------------------- |
-| `getPage()`            | 获取页面元数据（字段配置、页面设置） | GET `/{area}/{controller}/GetPage`      |
-| `getFields(kind)`      | 获取指定类型的字段列表               | GET `/{area}/{controller}/GetFields`    |
+| `getPage()`            | 获取页面元数据（字段配置、页面设置） | GET `/{area}/{controller}/meta`         |
 | `getList(params)`      | 分页列表查询                         | GET `/{area}/{controller}`              |
 | `getDetail(id)`        | 查看详情                             | GET `/{area}/{controller}/Detail`       |
 | `add(data)`            | 新增                                 | POST `/{area}/{controller}`             |
 | `update(data)`         | 编辑                                 | PUT `/{area}/{controller}`              |
 | `remove(id)`           | 删除单条                             | DELETE `/{area}/{controller}`           |
 | `deleteSelect(keys)`   | 批量删除                             | DELETE `/{area}/{controller}`           |
-| `uploadFile(file)`     | 上传文件                             | POST `/{area}/{controller}/UploadFile`  |
-| `importFile(file)`     | 导入文件                             | POST `/{area}/{controller}/ImportFile`  |
+| `uploadFile(file)`     | 上传文件                             | POST `/{area}/{controller}/attachments` |
+| `importFile(file)`     | 导入文件                             | POST `/{area}/{controller}/import`      |
 | `getExportUrl(format)` | 获取导出下载 URL                     | 直接返回 URL                            |
-| `getChartData()`       | 获取图表数据                         | GET `/{area}/{controller}/GetChartData` |
+| `getChartData()`       | 获取图表数据                         | GET `/{area}/{controller}/charts`       |
 
 ### 在页面中使用
 
@@ -219,7 +218,7 @@ onMounted(() => fetchList());
 | 路径 | 入口 | 全局是否自动弹错 | 业务页面是否还需处理 |
 | --- | --- | --- | --- |
 | 默认模板页 | `@newlifex/cube-vue` 的 `request` | ✅ 是 | ❌ 不需要，catch 里只做复位/日志 |
-| 自定义页 | `usePageApi` / `@newlifex/api-core` 的 `cubeApi` | ⚠️ 取决于是否挂 `onBusinessError` | 见下方说明 |
+| 自定义页 | `usePageApi` / `@newlifex/cube` 的 `cubeApi` | ⚠️ 取决于是否挂 `onBusinessError` | 见下方说明 |
 
 - **默认模板页**：全局拦截器已统一弹错，业务 `catch` 不要再 `ElMessage.error`，否则重复弹两次。正确写法：`catch` 只留 `console.error`，`finally` 复位 loading。
 - **自定义页（usePageApi）**：`useCubeApi` 内部已挂 `onFieldError`（字段级错误会 `ElMessage.error` 弹窗）。因此自定义页 `catch` 同样**不要**再 `ElMessage.error`，否则重复弹窗；`catch` 只做复位 / `console.error`，与默认模板页一致。如需自定义业务错误文案，可在 `src/api/index.ts` 挂一次 `onBusinessError`，但不要在页面内重复弹。

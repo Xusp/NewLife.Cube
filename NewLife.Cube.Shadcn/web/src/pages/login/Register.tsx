@@ -4,14 +4,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import api from '@/api';
-import type { AuthCategory } from '@newlifex/api-core';
+import type { AuthCategory, LoginConfig } from '@newlifex/cube';
 
 export default function Register() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const oauthToken = params.get('oauthToken') || '';
 
-  const [config, setConfig] = useState<any>(null);
+  const [config, setConfig] = useState<LoginConfig | null>(null);
   const [tab, setTab] = useState<'password' | 'mobile' | 'mail'>('password');
   const [sending, setSending] = useState(false);
   const [countdown, setCountdown] = useState(0);
@@ -28,12 +28,13 @@ export default function Register() {
   });
 
   const oauthMode = !!oauthToken;
-  const enableSmsRegister = useMemo(() => !!(config?.enableSmsRegister ?? config?.enableSms), [config]);
-  const enableMailRegister = useMemo(() => !!(config?.enableMailRegister ?? config?.enableMail), [config]);
+  const enableSmsRegister = useMemo(() => config?.register?.sms === true, [config]);
+  const enableMailRegister = useMemo(() => config?.register?.mail === true, [config]);
+  const tenant = params.get('tenant') ?? params.get('tenantCode') ?? params.get('code') ?? undefined;
 
   useEffect(() => {
-    api.user.getLoginConfig().then((res) => setConfig(res.data)).catch(() => {});
-  }, []);
+    api.user.getLoginConfig(tenant).then((res) => setConfig(res.data)).catch(() => {});
+  }, [tenant]);
 
   useEffect(() => {
     if (!oauthToken) return;
@@ -72,7 +73,7 @@ export default function Register() {
     if (!form.password || !form.confirmPassword) return setError('请输入密码和确认密码');
     if (form.password !== form.confirmPassword) return setError('两次密码不一致');
     if (tab === 'mobile' && (!form.mobile || !form.code)) return setError('请填写手机号和验证码');
-    if (tab === 'mail' && (!form.emailCodeTarget || !form.code)) return setError('请填写邮笱和验证码');
+    if (tab === 'mail' && (!form.emailCodeTarget || !form.code)) return setError('请填写邮箱和验证码');
 
     const payload = oauthMode
       ? { category: 'oauth' as AuthCategory, oauthToken, username: form.username, email: form.email, password: form.password, confirmPassword: form.confirmPassword }
@@ -113,7 +114,7 @@ export default function Register() {
           <div className="mb-4 flex rounded-lg bg-muted p-1">
             <button type="button" className={`flex-1 rounded-md px-3 py-1.5 text-sm ${tab==='password'?'bg-background shadow':''}`} onClick={() => setTab('password')}>账号</button>
             {enableSmsRegister && <button type="button" className={`flex-1 rounded-md px-3 py-1.5 text-sm ${tab==='mobile'?'bg-background shadow':''}`} onClick={() => setTab('mobile')}>手机</button>}
-            {enableMailRegister && <button type="button" className={`flex-1 rounded-md px-3 py-1.5 text-sm ${tab==='mail'?'bg-background shadow':''}`} onClick={() => setTab('mail')}>邮笱</button>}
+            {enableMailRegister && <button type="button" className={`flex-1 rounded-md px-3 py-1.5 text-sm ${tab==='mail'?'bg-background shadow':''}`} onClick={() => setTab('mail')}>邮箱</button>}
           </div>
         )}
 

@@ -1,4 +1,4 @@
-﻿# 用户登录验证（登录 / 注册 / 忘记密码）
+# 用户登录验证（登录 / 注册 / 忘记密码）
 
 > 本文档是魔方用户验证业务的**权威总览**，同时覆盖 **MVC（服务端渲染）** 与 **API（前后端分离）** 两种接入方式。
 > 登录、注册、忘记密码三大业务，及其下所有登录/注册/找回方式，均在此完整定义。
@@ -326,7 +326,7 @@ UserService.ResetPassword
 
 ### 5.4 登录配置
 
-- API：`GET /Auth/LoginConfig?tenant=` → `{ name, copyright, registration, loginTip, loginLogo, loginBackground, login{password,sms,mail,captcha,sendCode}, register{enabled,password,sms,mail,captcha}, oauth[], security{challengeRequired,mfaAvailable,passwordComplexity,passwordStrength} }`；`login.captcha`/`register.captcha`/`login.sendCode` 按当前请求环境**动态判定**（CaptchaScene 强制 + 风险自适应），非静态位掩码
+- API：`GET /Auth/LoginConfig?tenant=` → `{ enableTenant, code, login{password,sms,mail,captcha,sendCode}, register{enabled,password,sms,mail,captcha,requireMailVerify,requireMobileVerify}, oauth[], security{challengeRequired,mfaAvailable,passwordComplexity,passwordStrength} }`；`login.captcha`/`register.captcha`/`login.sendCode` 按当前请求环境**动态判定**（CaptchaScene 强制 + 风险自适应），非静态位掩码。站点名称/Logo/版权/备案/语言选项等品牌信息由匿名接口 `GET /Cube/Site` 提供（见《Api/认证接口设计》2.2）
 - MVC：`LoginViewModel` 服务端填充（`DisplayName/AllowLogin/AllowRegister/EnableSms/EnableMail/EnablePasswordComplexity/PasswordStrength/RequireCaptcha/RequireCaptchaRegister/OAuthItems/...`）
 
 ### 5.5 令牌与会话

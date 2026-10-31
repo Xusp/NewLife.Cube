@@ -1,5 +1,5 @@
 import type { EChartsOption } from 'echarts';
-import type { ChartType, MeasureFn, WidgetChartOptions, WidgetMeasure } from '@newlifex/api-core';
+import type { ChartType, MeasureFn, WidgetChartOptions, WidgetMeasure } from '@newlifex/cube';
 import { themeColor } from '@/core/utils/themeColor';
 
 export interface ChartItem {

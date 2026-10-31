@@ -62,6 +62,7 @@ NewLife.Cube.Svelte/wwwroot/_app/
 NewLife.Cube.TDesign/wwwroot/assets/
 NewLife.Cube.Vuetify/wwwroot/assets/
 /XUnitTest/TestResults
+/TestResults/
 .shot/
 */memory/*.md
 TODO.md
@@ -73,6 +74,7 @@ NewLife.Cube.ArcoVue/_build_talk_pptx.py
 NewLife.Cube.ArcoVue/前端框架分享-预读.md
 .codegraph/
 .serena/
+.tmp/
 
 # ===== 第三方主题静态资源 / 构建工具：移出版本库（不应入库） =====
 # 老皮肤项目的 wwwroot：均为第三方主题包、字体、vendored JS（echarts/element/bootstrap 等），
@@ -95,3 +97,4 @@ xcodetool.exe
 .umi-production/
 NewLife.Cube.Vue/web/scripts/element-tokens.json
 Doc/Architecture/
+.DS_Store

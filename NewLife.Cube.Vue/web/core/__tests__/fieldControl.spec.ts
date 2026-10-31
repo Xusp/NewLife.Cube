@@ -14,6 +14,10 @@
 import { describe, it, expect } from 'vitest';
 import type { FieldMeta } from '../types/field';
 import {
+  areaLevel,
+  isMoneyItemType,
+  isPercentItemType,
+  parseDecimalItemType,
   resolveControl,
   resolveSearchControl,
   resolveListControl,
@@ -120,6 +124,41 @@ describe('resolveControl（表单编辑控件）', () => {
     expect(resolveControl(f({ name: 'UrlVal', typeName: 'String', itemType: 'url' }))).toBe('url');
   });
 
+  it('ItemType=password → password（对齐 MVC 遮蔽输入）', () => {
+    expect(resolveControl(f({ name: 'Pass', typeName: 'String', itemType: 'password' }))).toBe('password');
+  });
+
+  it('ItemType=phone/fax → tel，email → email（MVC 别名对齐）', () => {
+    expect(resolveControl(f({ name: 'Phone', typeName: 'String', itemType: 'phone' }))).toBe('tel');
+    expect(resolveControl(f({ name: 'Fax', typeName: 'String', itemType: 'fax' }))).toBe('tel');
+    expect(resolveControl(f({ name: 'Email', typeName: 'String', itemType: 'email' }))).toBe('email');
+  });
+
+  it('ItemType=textarea → textarea，richtext → richHtml', () => {
+    expect(resolveControl(f({ name: 'Brief', typeName: 'String', itemType: 'textarea' }))).toBe('textarea');
+    expect(resolveControl(f({ name: 'Rich', typeName: 'String', itemType: 'richtext' }))).toBe('richHtml');
+  });
+
+  it('ItemType=avatar/attachment → image/upload', () => {
+    expect(resolveControl(f({ name: 'Photo', typeName: 'String', itemType: 'avatar' }))).toBe('image');
+    expect(resolveControl(f({ name: 'Doc', typeName: 'String', itemType: 'attachment' }))).toBe('upload');
+  });
+
+  it('ItemType=number → inputNumber', () => {
+    expect(resolveControl(f({ name: 'Num', typeName: 'String', itemType: 'number' }))).toBe('inputNumber');
+  });
+
+  it('ItemType 大小写与空格归一（PASSWORD / Phone /  Textarea ）', () => {
+    expect(resolveControl(f({ name: 'Pass', typeName: 'String', itemType: 'PASSWORD' }))).toBe('password');
+    expect(resolveControl(f({ name: 'Phone', typeName: 'String', itemType: 'Phone' }))).toBe('tel');
+    expect(resolveControl(f({ name: 'Brief', typeName: 'String', itemType: '  Textarea ' }))).toBe('textarea');
+  });
+
+  it('未知 ItemType 回退 TypeName 推断，不抛异常', () => {
+    expect(resolveControl(f({ name: 'N', typeName: 'Int32', itemType: 'not-a-type' }))).toBe('inputNumber');
+    expect(resolveControl(f({ name: 'S', typeName: 'String', length: 40, itemType: 'not-a-type' }))).toBe('input');
+  });
+
   it('Guid → readonly', () => {
     expect(resolveControl(f({ name: 'GuidVal', typeName: 'Guid' }))).toBe('readonly');
   });
@@ -215,6 +254,16 @@ describe('resolveListControl（列表渲染控件）', () => {
     expect(resolveListControl(f({ name: 'F', typeName: 'String', itemType: 'file' }))).toBe('file');
   });
 
+  it('image-*/file-* 前缀同样识别为图片/附件', () => {
+    expect(resolveListControl(f({ name: 'I', typeName: 'String', itemType: 'image-jpg' }))).toBe('image');
+    expect(resolveListControl(f({ name: 'F', typeName: 'String', itemType: 'file-zip' }))).toBe('file');
+  });
+
+  it('password/textarea 等文本类别名在列表按文本呈现', () => {
+    expect(resolveListControl(f({ name: 'P', typeName: 'String', itemType: 'password' }))).toBe('text');
+    expect(resolveListControl(f({ name: 'T', typeName: 'String', itemType: 'textarea' }))).toBe('text');
+  });
+
   it('color → color', () => {
     expect(resolveListControl(f({ name: 'C', typeName: 'String', itemType: 'color' }))).toBe('color');
   });
@@ -299,5 +348,49 @@ describe('resolveNumberPrecision / resolveNumberStep（数值精度）', () => {
 
   it('未识别数值类型 → undefined（不限制进度）', () => {
     expect(resolveNumberPrecision(f({ name: 'X', typeName: 'UnknownNum' }))).toBeUndefined();
+  });
+});
+
+describe('ItemType 扩展：percent / money / decimal(p,s) / 前缀', () => {
+  it('percent / money / decimal(p,s) → inputNumber', () => {
+    expect(resolveControl(f({ name: 'Rate', typeName: 'Double', itemType: 'percent' }))).toBe('inputNumber');
+    expect(resolveControl(f({ name: 'Amount', typeName: 'Decimal', itemType: 'Money' }))).toBe('inputNumber');
+    expect(resolveControl(f({ name: 'Price', typeName: 'Decimal', itemType: 'decimal(18,3)' }))).toBe('inputNumber');
+  });
+
+  it('file-zip / image-small 前缀 → upload / image', () => {
+    expect(resolveControl(f({ name: 'Zip', typeName: 'String', itemType: 'file-zip' }))).toBe('upload');
+    expect(resolveControl(f({ name: 'Pic', typeName: 'String', itemType: 'image-small' }))).toBe('image');
+  });
+
+  it('搜索与列表对 percent / money 走数值口径', () => {
+    expect(resolveSearchControl(f({ name: 'Rate', typeName: 'Double', itemType: 'percent' }))).toBe('numberRange');
+    expect(resolveSearchControl(f({ name: 'Amount', typeName: 'Decimal', itemType: 'Money' }))).toBe('numberRange');
+    expect(resolveListControl(f({ name: 'Amount', typeName: 'Decimal', itemType: 'Money' }))).toBe('number');
+    expect(resolveListControl(f({ name: 'Price', typeName: 'Decimal', itemType: 'decimal(18,3)' }))).toBe('number');
+  });
+
+  it('decimal(p,s) 的 scale 优先于 BindColumn.Scale', () => {
+    const field = f({ name: 'Price', typeName: 'Decimal', itemType: 'decimal(18,3)', scale: 2 });
+    expect(parseDecimalItemType(field.itemType)).toEqual({ precision: 18, scale: 3 });
+    expect(resolveNumberPrecision(field)).toBe(3);
+    expect(resolveNumberStep(field)).toBe(0.001);
+  });
+
+  it('ItemType 判定不区分大小写', () => {
+    expect(isPercentItemType('Percentage')).toBe(true);
+    expect(isPercentItemType('percent')).toBe(true);
+    expect(isMoneyItemType('MONEY')).toBe(true);
+    expect(isMoneyItemType('decimal(18,2)')).toBe(false);
+  });
+
+  it('area1~4 映射为地区级联并解析层级', () => {
+    for (const level of [1, 2, 3, 4]) {
+      const field = f({ name: 'AreaId', typeName: 'Int32', itemType: `area${level}` });
+      expect(resolveControl(field)).toBe('area');
+      expect(resolveSearchControl(field)).toBe('area');
+      expect(areaLevel(field)).toBe(level);
+    }
+    expect(areaLevel(f({ name: 'AreaId', typeName: 'Int32', itemType: 'area' }))).toBe(3);
   });
 });

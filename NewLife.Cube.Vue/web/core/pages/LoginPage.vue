@@ -5,18 +5,19 @@
   核心理念：使用 Element Plus CSS 变量驱动全部配色，自动适配多主题（cyber/forest/aurora/industrial）与黑白模式。
 
   功能：
-  1. onMounted 调用 /Auth/LoginConfig 获取后端登录配置
+  1. onMounted 并行调用 /Cube/Site 与 /Auth/LoginConfig（透传 ?tenant=），分别获取站点品牌与登录能力
   2. 根据配置渲染密码表单 / OAuth 入口 / 版权信息
   3. 密码登录成功后写入 token 并跳回 redirect 页面
   4. OAuth 跳转 URL 统一为 /Sso/Login/{name}?source=front-end&redirect_uri={redirect}
   5. 当 login.password === false 且 oauth.length === 1 时自动跳转
   6. Canvas 粒子动画系统，颜色从 --el-color-primary 动态读取，随主题切换实时变化
+  7. 登录前即可切换语言，偏好仅存浏览器，服务端文案随 Accept-Language 刷新
 
   依赖：
   - core/configure 的 getConfig() 获取 baseUrl
   - core/utils/token 的 setAccessToken() 写入 token
-  - core/utils/loginApi 的 fetchLoginConfig / loginByPassword 调用后端
-  - @newlifex/api-core 的类型定义
+  - core/utils/loginApi 的 fetchSiteConfig / fetchLoginConfig / loginByPassword 调用后端
+  - @newlifex/cube 的类型定义
 -->
 <template>
   <div class="login-page">
@@ -26,6 +27,13 @@
     <div class="bg-glow"></div>
     <!-- 粒子画布 -->
     <canvas ref="particleCanvas" class="particle-canvas"></canvas>
+
+    <!-- 语言切换：登录前也允许选择，偏好仅保存在浏览器 -->
+    <LanguageSwitch
+      v-if="!siteConfig?.language?.locked"
+      class="login-language"
+      @change="reloadSiteConfig"
+    />
 
     <!-- 登录主容器 -->
     <div class="login-wrapper" v-loading="loading">
@@ -50,8 +58,8 @@
             <rect x="21.5" y="21.5" width="13" height="13" rx="3" class="logo-core" />
           </svg>
           <h1 class="brand-name">{{ systemName }}</h1>
-          <p v-if="loginConfig?.loginTip" class="brand-hint">
-            {{ loginConfig.loginTip }}
+          <p v-if="siteConfig?.loginTip" class="brand-hint">
+            {{ siteConfig.loginTip }}
           </p>
         </div>
 
@@ -64,7 +72,7 @@
             data-tab="Login"
             @click="switchTab('login')"
           >
-            登 录
+            {{ t('login.tabLogin') }}
           </button>
           <button
             v-if="showRegister"
@@ -74,28 +82,29 @@
             data-tab="Register"
             @click="switchTab('register')"
           >
-            注 册
+            {{ t('login.tabRegister') }}
           </button>
         </div>
 
         <!-- 注册成功待激活提示（开启邮箱/手机验证时注册后进入） -->
         <div v-if="pendingActivation" class="pending-card">
           <div class="pending-icon">✉</div>
-          <div class="pending-title">注册成功，请激活账号</div>
+          <div class="pending-title">{{ t('login.pendingTitle') }}</div>
           <div class="pending-desc">
-            激活{{ pendingActivation.channels?.includes('mail') ? '邮件' : '短信' }}已发送至
-            <strong>{{ pendingActivation.targets?.join('、') }}</strong>
-            ，请查收并完成激活。激活前无法登录。
+            {{ t('login.pendingDesc', {
+              channel: pendingActivation.channels?.includes('mail') ? t('login.channelMail') : t('login.channelSms'),
+              targets: pendingActivation.targets?.join(', ') ?? '',
+            }) }}
           </div>
           <div class="pending-actions">
-            <button type="button" class="login-btn pending-btn" @click="backToLogin">返回登录</button>
+            <button type="button" class="login-btn pending-btn" @click="backToLogin">{{ t('login.backToLogin') }}</button>
             <button
               v-if="pendingActivation.targets?.length"
               type="button"
               class="link-btn"
               @click="resendPending"
             >
-              重新发送
+              {{ t('login.resend') }}
             </button>
           </div>
         </div>
@@ -110,17 +119,22 @@
             @submit="handleLogin"
           />
 
+          <!-- 忘记密码入口：走验证码重置，仅当站点开启短信/邮件通道时展示 -->
+          <div v-if="showPasswordForm && showForgotPassword" class="forgot-row">
+            <a class="forgot-link" data-cy="forgot-entry" @click="goForgotPassword">{{ t('login.forgotPassword') }}</a>
+          </div>
+
           <!-- 未激活账号：重发激活入口 -->
           <div v-if="notActivated" class="resend-row">
-            <span class="resend-text">账号未激活，请先激活后再登录</span>
-            <a class="resend-link" @click="openResend">重新发送激活</a>
+            <span class="resend-text">{{ t('login.notActivated') }}</span>
+            <a class="resend-link" @click="openResend">{{ t('login.resendActivation') }}</a>
           </div>
 
           <!-- OAuth 第三方登录入口 -->
           <div v-if="oauthProviders.length > 0" class="oauth-section">
             <div v-if="showPasswordForm" class="oauth-divider">
               <div class="divider-line"></div>
-              <span class="divider-text">其他登录方式</span>
+              <span class="divider-text">{{ t('login.otherMethods') }}</span>
               <div class="divider-line"></div>
             </div>
             <div class="oauth-buttons">
@@ -158,14 +172,14 @@
         </div>
 
         <!-- 底部版权信息 -->
-        <footer v-if="loginConfig?.copyright || loginConfig?.registration" class="login-footer">
+        <footer v-if="siteConfig?.copyright || siteConfig?.registration" class="login-footer">
           <div
-            v-if="loginConfig?.copyright"
+            v-if="siteConfig?.copyright"
             class="footer-copy"
-            v-html="loginConfig.copyright"
+            v-html="siteConfig.copyright"
           ></div>
-          <div v-if="loginConfig?.registration" class="footer-registration">
-            {{ loginConfig.registration }}
+          <div v-if="siteConfig?.registration" class="footer-registration">
+            {{ siteConfig.registration }}
           </div>
         </footer>
       </div>
@@ -176,11 +190,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { getConfig } from '../configure';
 import { setAccessToken, setRefreshToken } from '../utils/token';
 import {
   fetchLoginConfig,
+  fetchSiteConfig,
   loginByPassword,
   registerByForm,
   sendCode,
@@ -188,12 +204,21 @@ import {
 } from '../utils/loginApi';
 import LoginForm from './LoginForm.vue';
 import RegisterForm from './RegisterForm.vue';
-import type { LoginConfig, LoginResult, OAuthProvider } from '@newlifex/api-core';
+import LanguageSwitch from '../components/LanguageSwitch.vue';
+import type { LoginConfig, LoginResult, OAuthProvider, SiteConfig } from '@newlifex/cube';
 
 // ── 路由与配置 ──────────────────────────────────────────────────────
 const route = useRoute();
 const router = useRouter();
 const config = getConfig();
+const { t } = useI18n();
+
+/** 租户标识：登录链接可通过 ?tenant={id|code|name} 指定，未指定时由服务端按当前上下文解析 */
+const tenant = computed<string | undefined>(() => {
+  const value = route.query.tenant;
+  const text = Array.isArray(value) ? value[0] : value;
+  return text || undefined;
+});
 
 // ── 响应式状态 ──────────────────────────────────────────────────────
 /** 配置加载中 */
@@ -202,6 +227,8 @@ const loading = ref<boolean>(true);
 const submitting = ref<boolean>(false);
 /** 后端返回的登录配置 */
 const loginConfig = ref<LoginConfig | null>(null);
+/** 后端返回的站点配置（品牌、语言、功能开关） */
+const siteConfig = ref<SiteConfig | null>(null);
 /** 配置加载错误信息 */
 const configError = ref<string>('');
 /** 粒子画布引用 */
@@ -219,6 +246,16 @@ const notActivatedAccount = ref<string>('');
 /** 是否显示密码表单 */
 const showPasswordForm = computed<boolean>(() => loginConfig.value?.login?.password === true);
 
+/**
+ * 是否展示「忘记密码」入口
+ *
+ * 重置密码依赖通知通道，与后端约定一致：短信或邮件通道至少有一个开启才展示；
+ * 两个都关时即便展示也无法收码，反而增加无效入口。
+ */
+const showForgotPassword = computed<boolean>(
+  () => loginConfig.value?.login?.sms === true || loginConfig.value?.login?.mail === true,
+);
+
 /** 是否允许注册（显示注册 Tab） */
 const showRegister = computed<boolean>(() => loginConfig.value?.register?.enabled === true);
 
@@ -229,12 +266,12 @@ const oauthProviders = computed<OAuthProvider[]>(() => {
 
 /** 系统名称 */
 const systemName = computed<string>(() => {
-  return loginConfig.value?.displayName || loginConfig.value?.name || '';
+  return siteConfig.value?.name || t('login.defaultSystemName');
 });
 
-/** 登录页 Logo 地址（优先 loginLogo，其次 logo） */
+/** 登录页 Logo 地址 */
 const logoSrc = computed<string>(() => {
-  const logo = loginConfig.value?.loginLogo || loginConfig.value?.logo;
+  const logo = siteConfig.value?.logo;
   if (!logo) return '';
   return resolveLogo(logo);
 });
@@ -242,7 +279,7 @@ const logoSrc = computed<string>(() => {
 /** 背景样式（支持自定义背景图） */
 const backgroundStyle = computed<Record<string, string>>(() => {
   const style: Record<string, string> = {};
-  const bg = loginConfig.value?.loginBackground;
+  const bg = siteConfig.value?.loginBackground;
   if (bg) {
     style.backgroundImage = `url(${resolveLogo(bg)})`;
     style.backgroundSize = 'cover';
@@ -317,7 +354,7 @@ async function handleLogin(payload: { username: string; password: string }): Pro
       if (res.data.refreshToken) {
         setRefreshToken(res.data.refreshToken);
       }
-      ElMessage.success('登录成功，正在跳转...');
+      ElMessage.success(t('login.loginSuccess'));
       const redirect = (route.query.redirect as string) || '/';
       router.push(redirect);
     } else {
@@ -326,10 +363,10 @@ async function handleLogin(payload: { username: string; password: string }): Pro
         notActivated.value = true;
         notActivatedAccount.value = payload.username;
       }
-      ElMessage.error(res.message || '登录失败，请检查用户名和密码');
+      ElMessage.error(res.message || t('login.loginFailed'));
     }
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : '网络错误，请稍后重试';
+    const message = err instanceof Error ? err.message : t('login.networkError');
     ElMessage.error(message);
   } finally {
     submitting.value = false;
@@ -394,18 +431,18 @@ async function handleRegister(payload: {
         if (res.data.refreshToken) {
           setRefreshToken(res.data.refreshToken);
         }
-        ElMessage.success('注册成功，正在跳转...');
+        ElMessage.success(t('login.registerSuccessRedirect'));
         const redirect = (route.query.redirect as string) || '/';
         router.push(redirect);
       } else {
-        ElMessage.success(res.message || '注册成功');
+        ElMessage.success(res.message || t('login.registerSuccess'));
         activeTab.value = 'login';
       }
     } else {
-      ElMessage.error(res.message || '注册失败，请稍后重试');
+      ElMessage.error(res.message || t('login.registerFailed'));
     }
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : '网络错误，请稍后重试';
+    const message = err instanceof Error ? err.message : t('login.networkError');
     ElMessage.error(message);
   } finally {
     submitting.value = false;
@@ -419,12 +456,12 @@ async function handleSendCode(channel: 'mail' | 'sms', account: string): Promise
   try {
     const res = await sendCode(channel === 'mail' ? 'Mail' : 'Sms', account, 'register');
     if (res.code === 0) {
-      ElMessage.success('验证码已发送，请查收');
+      ElMessage.success(t('security.codeSent'));
     } else {
-      ElMessage.error(res.message || '验证码发送失败');
+      ElMessage.error(res.message || t('security.codeSendFailed'));
     }
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : '验证码发送失败';
+    const message = err instanceof Error ? err.message : t('security.codeSendFailed');
     ElMessage.error(message);
   }
 }
@@ -435,14 +472,14 @@ async function handleSendCode(channel: 'mail' | 'sms', account: string): Promise
 async function openResend(): Promise<void> {
   try {
     const { value } = await ElMessageBox.prompt(
-      '请输入注册时填写的邮箱或手机号',
-      '重新发送激活',
+      t('login.resendPrompt'),
+      t('login.resendActivation'),
       {
         inputValue: notActivatedAccount.value || '',
         inputPattern: /^([\w.+-]+@[\w-]+(\.[\w-]+)+|1[3-9]\d{9})$/,
-        inputErrorMessage: '请输入正确的邮箱或手机号',
-        confirmButtonText: '发送',
-        cancelButtonText: '取消',
+        inputErrorMessage: t('login.resendPromptInvalid'),
+        confirmButtonText: t('login.send'),
+        cancelButtonText: t('button.cancel'),
       },
     );
     if (value) {
@@ -461,17 +498,26 @@ async function resendPending(): Promise<void> {
   await doResend(detectChannel(account), account);
 }
 
+/**
+ * 前往忘记密码页（验证码重置，走匿名接口）
+ *
+ * 重置成功后由找回密码页自行跳回登录页，这里不额外记录状态。
+ */
+function goForgotPassword(): void {
+  router.push('/forgot-password');
+}
+
 /** 调用重发激活接口 */
 async function doResend(channel: 'mail' | 'sms', account: string): Promise<void> {
   try {
     const res = await sendActivateCode(channel === 'mail' ? 'Mail' : 'Sms', account);
     if (res.code === 0) {
-      ElMessage.success(res.message || '激活邮件/短信已重新发送，请查收');
+      ElMessage.success(res.message || t('login.activationResent'));
     } else {
-      ElMessage.error(res.message || '重新发送失败');
+      ElMessage.error(res.message || t('login.resendFailed'));
     }
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : '重新发送失败';
+    const message = err instanceof Error ? err.message : t('login.resendFailed');
     ElMessage.error(message);
   }
 }
@@ -742,30 +788,50 @@ function destroyParticleSystem(): void {
 
 // ── 生命周期 ────────────────────────────────────────────────────────
 
+/**
+ * 重新获取站点配置
+ *
+ * 语言切换后服务端可能返回不同语言的站点文案，需要重新拉取；失败时保留当前品牌信息。
+ */
+async function reloadSiteConfig(): Promise<void> {
+  try {
+    const res = await fetchSiteConfig(tenant.value);
+    if (res.code === 0 && res.data) siteConfig.value = res.data;
+  } catch {
+    // 站点配置是可选增强，失败不阻塞登录页
+  }
+}
+
 onMounted(async () => {
   // 初始化粒子动画
   initParticleSystem();
 
-  try {
-    const res = await fetchLoginConfig();
+  const [siteResult, loginResult] = await Promise.allSettled([fetchSiteConfig(tenant.value), fetchLoginConfig(tenant.value)]);
 
+  if (siteResult.status === 'fulfilled' && siteResult.value.code === 0) {
+    siteConfig.value = siteResult.value.data;
+  }
+
+  if (loginResult.status === 'fulfilled') {
+    const res = loginResult.value;
     if (res.code === 0 && res.data) {
       loginConfig.value = res.data;
 
       // 自动跳转：禁用密码 + 单第三方
       if (shouldAutoRedirect() && loginConfig.value.oauth?.[0]) {
+        loading.value = false;
         handleOAuth(loginConfig.value.oauth[0].name);
         return;
       }
     } else {
-      configError.value = res.message || '获取登录配置失败';
+      configError.value = res.message || t('login.configLoadFailed');
     }
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : '获取登录配置失败';
-    configError.value = message;
-  } finally {
-    loading.value = false;
+  } else {
+    const reason = loginResult.reason;
+    configError.value = reason instanceof Error ? reason.message : t('login.configLoadFailed');
   }
+
+  loading.value = false;
 });
 
 onUnmounted(() => {
@@ -780,6 +846,18 @@ onUnmounted(() => {
   min-height: 100vh;
   overflow-y: auto;
   background: var(--el-bg-color);
+}
+
+.login-language {
+  position: absolute;
+  top: 20px;
+  right: 24px;
+  z-index: 10;
+  padding: 6px 12px;
+  border-radius: 999px;
+  color: var(--el-text-color-primary);
+  background: var(--el-bg-color-overlay);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 8%);
 }
 
 /* ==================== 背景层 ==================== */
@@ -1058,6 +1136,23 @@ onUnmounted(() => {
 }
 
 .resend-link:hover {
+  text-decoration: underline;
+}
+
+/* ==================== 忘记密码 ==================== */
+.forgot-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.forgot-link {
+  color: var(--el-color-primary);
+  cursor: pointer;
+}
+
+.forgot-link:hover {
   text-decoration: underline;
 }
 

@@ -18,12 +18,17 @@ public static class PageHelpers
     /// <param name="verifySuccess">是否验证登录成功；测试故意用错误密码时传 false</param>
     public static async Task LoginAsync(IPage page, String username, String password, Boolean verifySuccess = true)
     {
+        // 首个注册用户会抢占管理员并禁用内置 admin；主链路每次登录前复位，避免用例顺序造成批量假红
+        if (String.Equals(username, AppFixture.AdminUser, StringComparison.OrdinalIgnoreCase) &&
+            String.Equals(password, AppFixture.AdminPass, StringComparison.Ordinal))
+            DatabaseHelper.EnsureAdminEnabled();
+
         // GotoAsync 到登录页时，若服务器检测到已有会话则会直接 302 到 /Admin；
         // Playwright 将此场景报告为 "Navigation ... is interrupted by another navigation to /Admin"。
         // 捕获该异常并视为登录成功（当前上下文已认证）。
         try
         {
-            await page.GotoAsync(AppFixture.BaseUrl + "/Admin/User/Login");
+            await page.GotoAsync(AppFixture.BaseUrl + "/Admin/User/Login", new PageGotoOptions { Timeout = 300_000 });
         }
         catch (PlaywrightException)
         {
@@ -33,68 +38,97 @@ public static class PageHelpers
                 return; // 已导航至后台，视为登录成功
             // 若仍在登录页则说明是其他错误，继续正常流程
         }
-        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        await page.WaitForLoadStateAsync(LoadState.NetworkIdle, new PageWaitForLoadStateOptions { Timeout = 60_000 });
 
         // 若导航到登录页后被 302 重定向到后台（服务端会话仍有效），则直接返回
         if (!page.Url.Contains("/User/Login", StringComparison.OrdinalIgnoreCase))
             return;
 
-        await page.FillAsync("#username", username);
-        await page.FillAsync("#password", password);
+        // RSA 挑战偶发不匹配（页面异步取密钥与点击的竞态）时，重新加载登录页获取新挑战后重试
+        const Int32 maxAttempts = 3;
+        for (var attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            if (attempt > 0)
+            {
+                await page.GotoAsync(AppFixture.BaseUrl + "/Admin/User/Login", new PageGotoOptions { Timeout = 300_000 });
+                await page.WaitForLoadStateAsync(LoadState.NetworkIdle, new PageWaitForLoadStateOptions { Timeout = 60_000 });
 
-        // 点击 #login-btn，由页面 JS 完成 RSA 加密并提交表单
-        // 使用 RunAndWaitForResponseAsync 等待 POST 响应，避免 <a href="#"> 的 hash 导航被误识别为表单提交完成的竞态条件
-        // RunAndWaitForNavigationAsync 会捕获 href="#" 触发的 hash 变化（而非真正的 POST 跳转），导致 session cookie 未设置即提前返回
-        await page.RunAndWaitForResponseAsync(
-            async () => await page.ClickAsync("#login-btn"),
-            resp => resp.Url.Contains("/User/Login", StringComparison.OrdinalIgnoreCase)
-                     && resp.Request.Method == "POST",
-            new PageRunAndWaitForResponseOptions { Timeout = 15_000 });
-        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+                // 上一次提交可能已登录成功，仅因重定向较慢而仍停留在登录页；
+                // 重试导航会 302 到后台，此时不应再等待用户名输入框
+                if (!page.Url.Contains("/User/Login", StringComparison.OrdinalIgnoreCase))
+                    return;
+            }
 
-        // 检查是否已离开登录页
-        if (!page.Url.Contains("/User/Login", StringComparison.OrdinalIgnoreCase))
-            return;
+            // 首次请求可能触发应用初始化（文件存储事件总线/菜单权限扫描），慢速 CI 上可能阻塞数分钟，留足等待时间
+            await page.WaitForSelectorAsync("#username", new PageWaitForSelectorOptions { Timeout = 300_000 });
+            await page.FillAsync("#username", username);
+            await page.FillAsync("#password", password);
 
-        if (!verifySuccess)
-            return;
+            // 点击 #login-btn，由页面 JS 完成 RSA 加密并提交表单
+            // 使用 RunAndWaitForResponseAsync 等待 POST 响应，避免 <a href="#"> 的 hash 导航被误识别为表单提交完成的竞态条件
+            // RunAndWaitForNavigationAsync 会捕获 href="#" 触发的 hash 变化（而非真正的 POST 跳转），导致 session cookie 未设置即提前返回
+            try
+            {
+                await page.RunAndWaitForResponseAsync(
+                    async () => await page.ClickAsync("#login-btn"),
+                    resp => resp.Url.Contains("/User/Login", StringComparison.OrdinalIgnoreCase)
+                             && resp.Request.Method == "POST",
+                    new PageRunAndWaitForResponseOptions { Timeout = 15_000 });
+            }
+            catch (PlaywrightException) when (!verifySuccess)
+            {
+                // 故意使用错误密码时，响应可能被重定向导航中断；统一由下方 URL 断言处理
+            }
+            await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
-        // 仍在登录页：可能是 POST 302 重定向与 WaitForLoadState 存在竞态（重定向尚未完成），
-        // 再等 2s；若重定向完成则登录实际成功
-        // 若 2s 内仍未离开登录页则属于真正的登录失败（如 RSA 挑战已过期），继续重试
+            // 检查是否已离开登录页
+            if (!page.Url.Contains("/User/Login", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            if (!verifySuccess)
+                return;
+
+            // 仍在登录页：可能是 POST 302 重定向与 WaitForLoadState 存在竞态（重定向尚未完成），
+            // 再等 2s；若重定向完成则登录实际成功
+            try
+            {
+                await page.WaitForURLAsync(
+                    u => !u.Contains("/User/Login", StringComparison.OrdinalIgnoreCase),
+                    new PageWaitForURLOptions { Timeout = 2_000 });
+                return; // 重定向完成，登录实际成功
+            }
+            catch { }
+
+            await page.WaitForTimeoutAsync(500);
+        }
+
+        // 验证登录成功；若仍在登录页则抛出异常，使调用方测试明确失败而非静默跳过
         try
         {
-            await page.WaitForURLAsync(
-                u => !u.Contains("/User/Login", StringComparison.OrdinalIgnoreCase),
-                new PageWaitForURLOptions { Timeout = 2_000 });
-            return; // 重定向完成，登录实际成功
+            var shot = Path.Combine(AppFixture.ScreenshotDir, $"login-fail-{DateTime.Now:yyyyMMdd-HHmmss}.png");
+            await page.ScreenshotAsync(new PageScreenshotOptions { Path = shot, FullPage = true });
         }
         catch { }
 
-        // 真正的登录失败（RSA 挑战已过期），重新加载登录页获取新挑战后重试一次
-        // 注意：此时任何进行中的导航已由上方 WaitForURLAsync 等待完毕，可安全调用 GotoAsync
-        await page.GotoAsync(AppFixture.BaseUrl + "/Admin/User/Login");
-        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-
-        await page.FillAsync("#username", username);
-        await page.FillAsync("#password", password);
-
-        await page.RunAndWaitForResponseAsync(
-            async () => await page.ClickAsync("#login-btn"),
-            resp => resp.Url.Contains("/User/Login", StringComparison.OrdinalIgnoreCase)
-                     && resp.Request.Method == "POST",
-            new PageRunAndWaitForResponseOptions { Timeout = 15_000 });
-        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-
-        // 验证登录成功；若仍在登录页则抛出异常，使调用方测试明确失败而非静默跳过
-        if (page.Url.Contains("/User/Login", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException($"登录失败，仍停留在登录页。URL={page.Url}，用户名={username}");
+        throw new InvalidOperationException($"登录失败，仍停留在登录页。URL={page.Url}，用户名={username}");
     }
 
     /// <summary>使用 admin 账号登录</summary>
     /// <param name="page">Playwright 页面对象</param>
-    public static Task LoginAsAdminAsync(IPage page) =>
-        LoginAsync(page, AppFixture.AdminUser, AppFixture.AdminPass);
+    public static async Task LoginAsAdminAsync(IPage page)
+    {
+        DatabaseHelper.EnsureAdminEnabled();
+        try
+        {
+            await LoginAsync(page, AppFixture.AdminUser, AppFixture.AdminPass);
+        }
+        catch
+        {
+            // 前序用例可能改过 admin 密码；回到默认密码后重试一次
+            DatabaseHelper.RestoreAdminPassword();
+            await LoginAsync(page, AppFixture.AdminUser, AppFixture.AdminPass);
+        }
+    }
 
     /// <summary>访问注销地址并等待跳转</summary>
     /// <param name="page">Playwright 页面对象</param>

@@ -13,7 +13,7 @@ import type {
   WidgetSortOrder,
   WidgetSourceItem,
   WidgetWidth,
-} from '@newlifex/api-core';
+} from '@newlifex/cube';
 import cubeApi from '@/api';
 import type { FieldMeta } from '@/core/types/field';
 import { emptyViewFilter, normalizeFilter, type ViewFilter } from '@/core/utils/viewProfile';

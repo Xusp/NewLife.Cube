@@ -8,8 +8,20 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  # 全解决方案编译校验（含主题、示例、AOT 冒烟等非测试工程）。
+  # Windows/Linux 双平台阻断：大小写、路径分隔符、换行等跨平台问题在这里暴露。
+  build:
+    name: build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows
+            os: windows-latest
+          - name: linux
+            os: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
@@ -22,9 +34,519 @@ jobs:
           8.x
           9.x
           10.x
+        cache: true
+        cache-dependency-path: '**/*.csproj'
     - name: Build
+      run: dotnet build 魔方.slnx -c Release --nologo
+
+  # 前端跨语言门禁：硬编码中文文案与主题 token 校验（不依赖 dotnet，单独跑一遍）。
+  # 新增页面/组件若直接写中文字面量，这里会阻断，强制走 i18n。
+  frontend-i18n:
+    name: frontend i18n (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup node
+      uses: actions/setup-node@v4
+      with:
+        node-version: 24
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v4
+    # 在仓库根安装：NewLife.Cube.Vue/web 是根工作区成员，目录内没有独立 lockfile
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+    - name: Hardcoded Chinese scan (must be 0)
+      run: node scripts/vue-i18n-scan.mjs --max=0
+    - name: Theme token check
+      working-directory: NewLife.Cube.Vue/web
+      run: node scripts/check-theme-tokens.mjs
+
+  # 单元/集成测试矩阵。win-x64 与 linux-x64 为阻断门禁，其余平台观察期。
+  unit:
+    name: unit (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    continue-on-error: ${{ matrix.experimental == true }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: win-x64
+            os: windows-latest
+          - name: linux-x64
+            os: ubuntu-latest
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            experimental: true
+          - name: win-arm64
+            os: windows-11-arm
+            experimental: true
+          - name: osx-arm64
+            os: macos-latest
+            experimental: true
+          - name: osx-x64
+            os: macos-15-intel
+            experimental: true
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup dotNET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.x
+        cache: true
+        cache-dependency-path: '**/*.csproj'
+    - name: Test (XUnitTest)
+      run: dotnet test XUnitTest/XUnitTest.csproj -c Release --nologo --logger "trx;LogFileName=XUnitTest-${{ matrix.name }}.trx" --results-directory TestResults
+    - name: Test (NewLife.Cube.Tests)
+      run: dotnet test NewLife.Cube.Tests/NewLife.Cube.Tests.csproj -c Release --nologo --logger "trx;LogFileName=CubeTests-${{ matrix.name }}.trx" --results-directory TestResults
+    - name: Upload Test Results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-${{ matrix.name }}
+        path: TestResults/*.trx
+        if-no-files-found: ignore
+
+  # ================= 指令集冒烟矩阵（JIT，观察期，不阻塞） =================
+  # 魔方是 Web 平台：不覆盖 Android/iOS 等应用模型目标（没有对应的测试宿主），但服务端指令集要真机/仿真跑过。
+  # 非 x64/arm64 指令集不跑单测与 E2E——数据库驱动要按目标架构取原生件、E2E 还要 Chromium，CI 无对应渠道；
+  # 这里改在目标架构运行时上跑两个冒烟件（产物由宿主 x64 SDK 构建，IL 与 RID 无关）：
+  #   AotSmoke —— 纯托管 18 场景（本地化、响应包装、格式校验、威胁检测、UA 解析、页面设置）；
+  #   WebSmoke —— 启动 Kestrel、动态端口绑定并完成一次 HTTP 往返，验证 Web 宿主栈。
+  # linux-arm / linux-riscv64 / linux-s390x 参与 push/PR，linux-loongarch64 仅人工触发
+  # （龙芯 SDK 240MB + QEMU 较慢，与 NewLife.Core 同策略）。转绿后逐项去掉 continue-on-error。
+  arch-arm32:
+    name: arch (linux-arm)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    continue-on-error: true
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup dotNET (host, for build)
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.x
+        cache: true
+        cache-dependency-path: '**/*.csproj'
+    - name: Build smokes (host x64 SDK, RID-independent IL)
       run: |
-        dotnet build 魔方.sln -c Release
+        dotnet build AotSmoke/AotSmoke.csproj -c Release --nologo
+        dotnet build WebSmoke/WebSmoke.csproj -c Release --nologo
+    - name: Set up QEMU (arm)
+      uses: docker/setup-qemu-action@v3
+      with:
+        platforms: arm
+    - name: Smoke (linux-arm) in arm32 Container
+      # arm32 官方有 aspnetcore 运行时/SDK（SDK 内含 AspNetCore.App 共享框架），容器内用 dotnet-install 取 arm 版 SDK
+      run: |
+        docker run --rm --platform linux/arm/v7 -v "$PWD:/src" -w /src arm32v7/debian:bookworm-slim sh -c '
+          set -e
+          apt-get update -qq && apt-get install -y -qq curl libicu-dev ca-certificates >/dev/null
+          curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+          bash /tmp/dotnet-install.sh --channel 10.0 --architecture arm --install-dir /usr/share/dotnet >/dev/null
+          ln -s /usr/share/dotnet/dotnet /usr/bin/dotnet
+          export DOTNET_CLI_TELEMETRY_OPTOUT=1
+          dotnet --list-runtimes
+          dotnet --list-runtimes | grep -q Microsoft.AspNetCore.App || { echo "缺失 Microsoft.AspNetCore.App 共享框架"; exit 1; }
+          dotnet /src/AotSmoke/bin/Release/net10.0/AotSmoke.dll
+          dotnet /src/WebSmoke/bin/Release/net10.0/WebSmoke.dll
+        '
+
+  arch-s390x:
+    name: arch (linux-s390x)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    continue-on-error: true
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup dotNET (host, for build)
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.x
+        cache: true
+        cache-dependency-path: '**/*.csproj'
+    - name: Build smokes (host x64 SDK, RID-independent IL)
+      run: |
+        dotnet build AotSmoke/AotSmoke.csproj -c Release --nologo
+        dotnet build WebSmoke/WebSmoke.csproj -c Release --nologo
+    - name: Set up QEMU (s390x)
+      uses: docker/setup-qemu-action@v3
+      with:
+        platforms: s390x
+    - name: Smoke (linux-s390x) in s390x Container
+      # s390x 是唯一的**大端**平台，用来验证字节序假设；运行时取 Ubuntu 24.04 官方源
+      # （noble-updates 提供 dotnet-runtime-10.0 / aspnetcore-runtime-10.0，官方不发 s390x runtime pack）
+      run: |
+        docker run --rm --platform linux/s390x -v "$PWD:/src" -w /src s390x/ubuntu:24.04 sh -c '
+          set -e
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends aspnetcore-runtime-10.0 libicu74 libssl3 ca-certificates >/dev/null
+          export DOTNET_CLI_TELEMETRY_OPTOUT=1
+          dotnet --list-runtimes
+          dotnet --list-runtimes | grep -q Microsoft.AspNetCore.App || { echo "缺失 Microsoft.AspNetCore.App 共享框架"; exit 1; }
+          dotnet /src/AotSmoke/bin/Release/net10.0/AotSmoke.dll
+          dotnet /src/WebSmoke/bin/Release/net10.0/WebSmoke.dll
+        '
+
+  arch-riscv64:
+    name: arch (linux-riscv64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    continue-on-error: true
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup dotNET (host, for build)
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.x
+        cache: true
+        cache-dependency-path: '**/*.csproj'
+    - name: Build smokes (host x64 SDK, RID-independent IL)
+      run: |
+        dotnet build AotSmoke/AotSmoke.csproj -c Release --nologo
+        dotnet build WebSmoke/WebSmoke.csproj -c Release --nologo
+    - name: Set up QEMU (riscv64)
+      uses: docker/setup-qemu-action@v3
+      with:
+        platforms: riscv64
+    - name: Download RISC-V .NET SDK (community build)
+      # 官方不发 linux-riscv64 runtime pack/SDK；filipnavara/dotnet-riscv 跟踪 dotnet VMR 全量构建，
+      # 版本锁定 10.0.113 与仓库 net10 对齐（替换渠道见 Doc/AOT兼容性分析.md §6）
+      run: |
+        curl -fL -o "$HOME/riscv64-sdk.tar.gz" \
+          https://github.com/filipnavara/dotnet-riscv/releases/download/10.0.113/dotnet-sdk-10.0.113-linux-riscv64.tar.gz
+        mkdir -p "$HOME/riscv64" && tar -xzf "$HOME/riscv64-sdk.tar.gz" -C "$HOME/riscv64"
+        chmod +x "$HOME/riscv64/dotnet" || true
+    - name: Smoke (linux-riscv64) in riscv64 Container
+      # DOTNET_EnableHWIntrinsic=0 规避 QEMU 用户态对扩展指令覆盖不全导致的非法指令
+      run: |
+        docker run --rm --platform linux/riscv64 -v "$PWD:/src" -w /src \
+          -v "$HOME/riscv64:/opt/dotnet:ro" \
+          -e DOTNET_ROOT=/opt/dotnet \
+          -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+          -e DOTNET_EnableHWIntrinsic=0 \
+          -e DOTNET_EnableWriteXorExecute=0 \
+          riscv64/ubuntu:24.04 sh -c '
+            set -e
+            apt-get update -qq
+            apt-get install -y -qq --no-install-recommends libicu74 libssl3 libstdc++6 ca-certificates >/dev/null
+            /opt/dotnet/dotnet --list-runtimes
+            /opt/dotnet/dotnet --list-runtimes | grep -q Microsoft.AspNetCore.App || { echo "缺失 Microsoft.AspNetCore.App 共享框架"; exit 1; }
+            /opt/dotnet/dotnet /src/AotSmoke/bin/Release/net10.0/AotSmoke.dll
+            /opt/dotnet/dotnet /src/WebSmoke/bin/Release/net10.0/WebSmoke.dll
+          '
+
+  arch-loongarch64:
+    name: arch (linux-loongarch64 qemu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    if: github.event_name == 'workflow_dispatch'
+    continue-on-error: true
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup dotNET (host, for build)
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.x
+        cache: true
+        cache-dependency-path: '**/*.csproj'
+    - name: Build smokes (host x64 SDK, RID-independent IL)
+      run: |
+        dotnet build AotSmoke/AotSmoke.csproj -c Release --nologo
+        dotnet build WebSmoke/WebSmoke.csproj -c Release --nologo
+    - name: Set up QEMU (loong64)
+      uses: docker/setup-qemu-action@v3
+      with:
+        platforms: loong64
+    - name: Download Loongson .NET SDK (linux-loongarch64)
+      # 官方无 LA64 runner/runtime pack；龙芯 SDK 为 VMR 源码构建，自带 LA64 loader 所需的共享框架
+      run: |
+        curl -fL -o "$HOME/la64-sdk.tar.gz" \
+          https://github.com/loongson/dotnet/releases/download/v10.0.113-loongarch64/dotnet-sdk-10.0.113-linux-loongarch64.tar.gz
+        mkdir -p "$HOME/la64" && tar -xzf "$HOME/la64-sdk.tar.gz" -C "$HOME/la64"
+        chmod +x "$HOME/la64/dotnet" || true
+    - name: Smoke (linux-loongarch64) in loong64 Container
+      # 裸宿主缺 LA64 动态加载器，必须在自带 loader 的 loong64 容器内执行；
+      # 龙芯 SDK 的 MSBuild 在 QEMU 下不稳，故构建全放宿主（IL 与 RID 无关）
+      run: |
+        docker run --rm --platform linux/loong64 \
+          -v "$PWD:/src" -w /src \
+          -v "$HOME/la64:/opt/dotnet:ro" \
+          -e DOTNET_ROOT=/opt/dotnet \
+          -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+          -e DOTNET_EnableHWIntrinsic=0 \
+          lcr.loongnix.cn/debian:14-slim sh -c '
+            set -e
+            apt-get update -qq
+            apt-get install -y -qq --no-install-recommends libicu-dev libssl-dev >/dev/null
+            /opt/dotnet/dotnet --list-runtimes
+            /opt/dotnet/dotnet --list-runtimes | grep -q Microsoft.AspNetCore.App || { echo "缺失 Microsoft.AspNetCore.App 共享框架"; exit 1; }
+            /opt/dotnet/dotnet /src/AotSmoke/bin/Release/net10.0/AotSmoke.dll
+            /opt/dotnet/dotnet /src/WebSmoke/bin/Release/net10.0/WebSmoke.dll
+          '
+
+  # MVC 端到端测试：启动真实 CubeSSO + SQLite 临时库 + Chromium。
+  e2e:
+    name: e2e (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    continue-on-error: ${{ matrix.experimental == true }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: win-x64
+            os: windows-latest
+          - name: linux-x64
+            os: ubuntu-latest
+          - name: osx-arm64
+            os: macos-latest
+            experimental: true
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup dotNET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.x
+        cache: true
+        cache-dependency-path: '**/*.csproj'
+    - name: Build CubeSSO
+      run: dotnet build CubeSSO/CubeSSO.csproj -c Release --nologo
+    # E2EMvcTest 的输出目录是 Bin/E2ETest，Microsoft.Playwright 的构建目标会把 playwright.ps1
+    # 复制到这里；不先构建测试工程，下面的浏览器安装步骤会因为找不到脚本而失败。
+    - name: Build E2E test project
+      run: dotnet build E2EMvcTest/E2EMvcTest.csproj -c Release --nologo
+    - name: Install Playwright browsers
+      shell: pwsh
+      run: |
+        if ($IsLinux) {
+          pwsh Bin/E2ETest/playwright.ps1 install --with-deps chromium
+        } else {
+          pwsh Bin/E2ETest/playwright.ps1 install chromium
+        }
     - name: Test
+      run: dotnet test E2EMvcTest/E2EMvcTest.csproj -c Release --nologo --logger "trx;LogFileName=E2E-${{ matrix.name }}.trx" --results-directory TestResults
+    - name: Upload E2E artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: e2e-${{ matrix.name }}
+        path: |
+          TestResults/*.trx
+          Bin/E2ETest/Run-*/server-*.log
+          Bin/E2ETest/Run-*/screenshots/**
+        if-no-files-found: ignore
+
+  # 多语言词表、运行时消息与 README 切换行守门。
+  localization:
+    name: localization checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Check locales
+      shell: pwsh
       run: |
-        dotnet test 魔方.sln
+        $failed = $false
+        Get-ChildItem -Path . -Recurse -Directory -Filter Locales | ForEach-Object {
+          if (Test-Path (Join-Path $_.FullName 'zh-Hans.yml')) {
+            # 带同形词白名单的目录（魔方主词表）额外做严格校验：译文不得回退英文
+            $strict = @()
+            if (Test-Path (Join-Path $_.FullName 'identical.allow.json')) { $strict = @('-Strict') }
+            # 元数据键清单存在时放宽孤儿键校验。
+            # 有覆盖基线时：译文较全的语言（zh-Hant/de/fr）强制 100%，其余语言按基线只拦新增缺口；
+            # 没有基线时退回 RequireFullCoverage（每种语言都必须有元数据译文）
+            $meta = Join-Path $_.FullName 'metadata-keys.json'
+            $metaArgs = @()
+            if (Test-Path $meta) {
+              $metaArgs = @('-MetadataKeys', $meta, '-MetadataSourceDir', (Split-Path $_.FullName -Parent))
+              $baseline = Join-Path $_.FullName 'metadata-coverage-baseline.json'
+              if (Test-Path $baseline) {
+                $metaArgs += @('-FullCoverageCultures', 'zh-Hant,de,fr', '-CoverageBaseline', $baseline)
+              } else {
+                $metaArgs += '-RequireFullCoverage'
+              }
+            }
+            pwsh -File ./check-locales.ps1 -LocaleDir $_.FullName -Baseline zh-Hans.yml @strict @metaArgs
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+          }
+        }
+        if ($failed) { exit 1 }
+    - name: Check English runtime messages
+      shell: pwsh
+      run: |
+        pwsh -File ./check-english-messages.ps1
+        pwsh -File ./check-english-messages.ps1 -Dir NewLife.CubeNC
+    - name: Check view keys have Chinese translation
+      shell: pwsh
+      run: pwsh -File ./check-missing-keys.ps1
+    - name: Check README languages
+      shell: pwsh
+      run: pwsh -File ./sync-readme-languages.ps1 -Check
+
+  # 前端公共包构建 + Vue 类型检查/单测。
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: pnpm/action-setup@v4
+      with:
+        version: 9.15.0
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24
+        cache: pnpm
+    - name: Install
+      run: pnpm install --frozen-lockfile
+    - name: Build shared packages
+      run: pnpm build
+    - name: Shared package unit tests
+      run: pnpm run test:packages
+    - name: Skin integration contract tests
+      run: pnpm run test:skins
+    - name: Vue type check
+      run: pnpm --filter ./NewLife.Cube.Vue/web run type-check
+    - name: Vue lint
+      run: pnpm --filter ./NewLife.Cube.Vue/web run lint
+    - name: Vue unit tests
+      run: pnpm --filter ./NewLife.Cube.Vue/web run test:unit
+    - name: Skin unit tests (MUI / Vuetify)
+      run: |
+        pnpm --filter ./NewLife.Cube.MUI/web run test:unit
+        pnpm --filter ./NewLife.Cube.Vuetify/web run test:unit
+    - name: Skin unit tests (NaiveUI / ArcoVue / TDesign / Shadcn / Svelte)
+      run: |
+        # Svelte 单测读 tsconfig 里的 ./.svelte-kit/tsconfig.json，需先 sync 生成（build 时会自动做）
+        pnpm --filter ./NewLife.Cube.Svelte/web exec svelte-kit sync
+        pnpm --filter ./NewLife.Cube.NaiveUI/web run test:unit
+        pnpm --filter ./NewLife.Cube.ArcoVue/web run test:unit
+        pnpm --filter ./NewLife.Cube.TDesign/web run test:unit
+        pnpm --filter ./NewLife.Cube.Shadcn/web run test:unit
+        pnpm --filter ./NewLife.Cube.Svelte/web run test:unit
+    - name: Use Node 22 for native TS test runner
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+    - name: Skin unit tests (Angular)
+      run: pnpm --filter ./NewLife.Cube.Angular/web run test:unit
+
+  # Vue 端到端：真实 CubeDemo + SQLite 临时库 + Chromium，串行（单设备登录会互相踢下线）。
+  vue-e2e:
+    name: vue e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup dotNET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.x
+        cache: true
+        cache-dependency-path: '**/*.csproj'
+    - uses: pnpm/action-setup@v4
+      with:
+        version: 9.15.0
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24
+        cache: pnpm
+    - name: Install
+      run: pnpm install --frozen-lockfile
+    - name: Build shared packages
+      run: pnpm build
+    - name: Build CubeDemo
+      run: dotnet build CubeDemo/CubeDemo.csproj -c Release --nologo
+    - name: Start CubeDemo (fresh SQLite)
+      run: |
+        cd Bin/CubeDemo
+        ASPNETCORE_URLS=http://localhost:7116 ASPNETCORE_ENVIRONMENT=Development nohup dotnet CubeDemo.dll > cube-demo.log 2>&1 &
+        for i in $(seq 1 60); do
+          if curl -sf -X POST http://localhost:7116/Auth/Login -H 'Content-Type: application/json' -d '{"username":"admin","password":"admin"}' > /tmp/login.json; then
+            echo "CubeDemo is up"; exit 0
+          fi
+          sleep 2
+        done
+        echo "CubeDemo failed to start"; cat cube-demo.log; exit 1
+    - name: Install Playwright browsers
+      run: pnpm --filter ./NewLife.Cube.Vue/web exec playwright install --with-deps chromium
+    - name: Vue e2e
+      env:
+        CI: 'true'
+        PLAYWRIGHT_API_URL: http://localhost:7116
+      run: pnpm --filter ./NewLife.Cube.Vue/web run test:e2e
+    - name: Upload e2e artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: vue-e2e
+        path: |
+          NewLife.Cube.Vue/web/playwright-report/**
+          NewLife.Cube.Vue/web/test-results/**
+          Bin/CubeDemo/cube-demo.log
+        if-no-files-found: ignore
+
+  # 八个 SPA 皮肤构建门禁：CI 原先只跑 Vue，其余皮肤的构建失败会静默漏过。
+  skins:
+    name: skins (${{ matrix.skin }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        skin: [NaiveUI, ArcoVue, Vuetify, TDesign, MUI, Shadcn, Angular, Svelte]
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: pnpm/action-setup@v4
+      with:
+        version: 9.15.0
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24
+        cache: pnpm
+    - name: Install
+      run: pnpm install --frozen-lockfile
+    - name: Build shared packages
+      run: pnpm build
+    - name: Build skin
+      run: pnpm --filter ./NewLife.Cube.${{ matrix.skin }}/web run build
+    - name: Svelte type check
+      if: matrix.skin == 'Svelte'
+      run: pnpm --filter ./NewLife.Cube.Svelte/web run check
+
+  # OpenAPI 契约守门：漏写 [Http*] 动词的 action 会被内建生成器静默丢弃。
+  openapi:
+    name: openapi contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup dotNET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.x
+        cache: true
+        cache-dependency-path: '**/*.csproj'
+    - name: Build & check contract
+      run: bash ./scripts/check-openapi.sh --build

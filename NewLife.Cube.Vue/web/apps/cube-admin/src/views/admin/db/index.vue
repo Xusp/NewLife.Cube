@@ -1,189 +1,149 @@
+<script setup lang="ts">
+/**
+ * 数据库管理（M3 自定义页）
+ *
+ * 元数据表达不了：数据库清单、表结构/实体结构诊断、模型差异与备份动作。
+ * 数据全部来自 `DbController` 的 JSON 接口，状态与动作收在 `useDbAdmin`，本文件只做渲染。
+ */
+import { onMounted } from 'vue';
+import { useI18n } from 'vue-i18n';
+import { columnFlag, precisionText } from '@newlifex/cube-vue/core/utils/dbSchema';
+import { useDbAdmin } from './useDbAdmin';
+
+const { t } = useI18n();
+const {
+  databases,
+  loading,
+  schemaVisible,
+  schemaLoading,
+  schemaMode,
+  schemas,
+  diffVisible,
+  diffLoading,
+  diffs,
+  loadDatabases,
+  openSchema,
+  openDiff,
+  compact,
+  backup,
+  downloadSchema,
+} = useDbAdmin();
+
+onMounted(() => loadDatabases());
+</script>
+
 <template>
-  <div>
+  <div class="db-page">
     <div class="page-header">
-      <h1>数据库管理</h1>
-      <p>数据库备份与管理操作</p>
+      <h1>{{ t('db.title') }}</h1>
+      <p>{{ t('db.subtitle') }}</p>
     </div>
 
     <el-card>
       <template #header>
         <div class="card-header">
-          <span>数据库操作</span>
+          <span>{{ t('db.listTitle') }}</span>
+          <el-button size="small" :loading="loading" @click="loadDatabases()">
+            {{ t('grid.refresh') }}
+          </el-button>
         </div>
       </template>
 
-      <div class="db-operations">
-        <el-form :model="backupForm" label-width="120px">
-          <el-form-item label="备份名称">
-            <el-input
-              v-model="backupForm.name"
-              placeholder="请输入备份名称，留空则自动生成"
-              style="width: 300px"
-            />
-          </el-form-item>
+      <el-table v-loading="loading" :data="databases" size="small" border>
+        <el-table-column prop="name" :label="t('common.name')" min-width="120" />
+        <el-table-column prop="type" :label="t('db.type')" width="110" />
+        <el-table-column prop="version" :label="t('db.version')" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="driver" :label="t('db.driver')" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="driverVersion" :label="t('db.driverVersion')" width="120" />
 
-          <el-form-item>
-            <el-button
-              type="primary"
-              :loading="loading.backup"
-              @click="handleBackup"
-            >
-              数据库备份
+        <el-table-column :label="t('db.entities')" width="90" align="center">
+          <template #default="{ row }">
+            <el-link type="primary" @click="openSchema('entities', row.name)">{{ row.entities }}</el-link>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('db.tables')" width="90" align="center">
+          <template #default="{ row }">
+            <el-link type="primary" @click="openSchema('tables', row.name)">{{ row.tables }}</el-link>
+          </template>
+        </el-table-column>
+        <el-table-column prop="backups" :label="t('db.backups')" width="90" align="center" />
+
+        <el-table-column :label="t('common.actions')" width="400" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="openSchema('tables', row.name)">
+              {{ t('db.viewTables') }}
             </el-button>
-            <el-button
-              type="success"
-              :loading="loading.backupCompress"
-              @click="handleBackupAndCompress"
-            >
-              备份并压缩
+            <el-button link type="primary" @click="openSchema('entities', row.name)">
+              {{ t('db.viewEntities') }}
             </el-button>
-          </el-form-item>
-        </el-form>
+            <el-button link type="primary" @click="openDiff(row.name)">{{ t('db.viewDiff') }}</el-button>
+            <el-button link type="primary" @click="compact(row.name)">{{ t('db.compact') }}</el-button>
+            <el-button link type="primary" @click="backup(row.name, false)">{{ t('db.backup') }}</el-button>
+            <el-button link type="primary" @click="backup(row.name, true)">{{ t('db.backupAndCompress') }}</el-button>
+            <el-button link type="primary" @click="downloadSchema(row.name)">{{ t('db.downloadSchema') }}</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
 
-        <el-divider />
-
-        <div class="download-section">
-          <h3>下载备份文件</h3>
-          <el-form :model="downloadForm" label-width="120px">
-            <el-form-item label="文件名称">
-              <el-input
-                v-model="downloadForm.name"
-                placeholder="请输入要下载的备份文件名"
-                style="width: 300px"
-              />
-            </el-form-item>
-
-            <el-form-item>
-              <el-button
-                type="info"
-                :loading="loading.download"
-                @click="handleDownload"
-              >
-                下载备份文件
-              </el-button>
-            </el-form-item>
-          </el-form>
+    <el-dialog
+      v-model="schemaVisible"
+      :title="schemaMode === 'tables' ? t('db.tableStructureTitle') : t('db.entityStructureTitle')"
+      width="80%"
+      top="6vh"
+    >
+      <div v-loading="schemaLoading" class="schema-body">
+        <el-empty v-if="!schemas.length" :description="t('common.noData')" />
+        <div v-for="item in schemas" :key="item.tableName" class="schema-table">
+          <h3 class="schema-title">
+            {{ item.displayName || item.name }}
+            <span class="muted">({{ item.tableName }}) [{{ item.count }}]</span>
+          </h3>
+          <el-table :data="item.columns" size="small" border max-height="360">
+            <el-table-column prop="name" :label="t('db.columnName')" min-width="140" show-overflow-tooltip />
+            <el-table-column prop="displayName" :label="t('db.displayName')" min-width="140" show-overflow-tooltip />
+            <el-table-column prop="type" :label="t('db.dataType')" width="120" />
+            <el-table-column :label="t('db.length')" width="80" align="center">
+              <template #default="{ row }">{{ row.length || '' }}</template>
+            </el-table-column>
+            <el-table-column :label="t('db.precision')" width="110" align="center">
+              <template #default="{ row }">{{ precisionText(row) }}</template>
+            </el-table-column>
+            <el-table-column :label="t('db.keyFlag')" width="70" align="center">
+              <template #default="{ row }">{{ columnFlag(row) }}</template>
+            </el-table-column>
+            <el-table-column :label="t('db.nullable')" width="70" align="center">
+              <template #default="{ row }">{{ row.nullable ? '' : 'N' }}</template>
+            </el-table-column>
+            <el-table-column prop="description" :label="t('db.description')" min-width="180" show-overflow-tooltip />
+          </el-table>
         </div>
       </div>
-    </el-card>
+      <template #footer>
+        <el-button @click="schemaVisible = false">{{ t('button.close') }}</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="diffVisible" :title="t('db.diffTitle')" width="70%" top="6vh">
+      <div v-loading="diffLoading" class="diff-body">
+        <el-empty v-if="!diffs.length" :description="t('db.diffEmpty')" />
+        <div v-for="item in diffs" :key="item.tableName" class="diff-item">
+          <h3 class="schema-title">
+            {{ item.name }} <span class="muted">({{ item.tableName }})</span>
+            <el-tag v-if="!item.hasEntityModel" size="small" type="warning">
+              {{ t('db.noEntityModel') }}
+            </el-tag>
+          </h3>
+          <p class="diff-columns">{{ t('db.extraColumns') }}: {{ item.extraColumns.join(', ') }}</p>
+          <pre class="diff-xml">{{ item.xmlFragment }}</pre>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="diffVisible = false">{{ t('button.close') }}</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
-
-<script setup lang="ts">
-import { reactive } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { request } from '@newlifex/cube-vue/core/utils/request'
-
-// 表单数据
-const backupForm = reactive({
-  name: ''
-})
-
-const downloadForm = reactive({
-  name: ''
-})
-
-// 加载状态
-const loading = reactive({
-  backup: false,
-  backupCompress: false,
-  download: false
-})
-
-// 数据库备份
-const handleBackup = async () => {
-  try {
-    loading.backup = true
-
-    const params = backupForm.name ? { name: backupForm.name } : {}
-    console.log('开始数据库备份:', params)
-
-    const data = await request.post('/Admin/Db/Backup', params)
-    console.log('数据库备份响应:', data)
-
-    ElMessage.success('数据库备份成功')
-    backupForm.name = ''
-  } catch (error) {
-    console.error('数据库备份错误:', error)
-    ElMessage.error('数据库备份失败')
-  } finally {
-    loading.backup = false
-  }
-}
-
-// 数据库备份并压缩
-const handleBackupAndCompress = async () => {
-  try {
-    await ElMessageBox.confirm(
-      '备份并压缩操作可能需要较长时间，确定要继续吗？',
-      '确认操作',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning',
-      }
-    )
-
-    loading.backupCompress = true
-
-    const params = backupForm.name ? { name: backupForm.name } : {}
-    console.log('开始数据库备份并压缩:', params)
-
-    const data = await request.post('/Admin/Db/BackupAndCompress', params)
-    console.log('数据库备份并压缩响应:', data)
-
-    ElMessage.success('数据库备份并压缩成功')
-    backupForm.name = ''
-  } catch (error) {
-    if (error !== 'cancel') {
-      console.error('数据库备份压缩错误:', error)
-      ElMessage.error('数据库备份并压缩失败')
-    }
-  } finally {
-    loading.backupCompress = false
-  }
-}
-
-// 下载备份文件
-const handleDownload = async () => {
-  if (!downloadForm.name.trim()) {
-    ElMessage.warning('请输入要下载的文件名')
-    return
-  }
-
-  try {
-    loading.download = true
-
-    console.log('开始下载备份文件:', downloadForm.name)
-
-    // 使用 request 发送下载请求，获取二进制数据
-    const blob = (await request.get('/Admin/Db/Download',
-      {
-        params: { name: downloadForm.name },
-        responseType: 'blob'
-      }
-    )) as unknown as Blob
-
-    // 创建下载链接
-    const url = window.URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = downloadForm.name
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    window.URL.revokeObjectURL(url)
-
-    ElMessage.success('文件下载成功')
-    downloadForm.name = ''
-  } catch (error) {
-    console.error('文件下载错误:', error)
-    ElMessage.error('文件下载失败')
-  } finally {
-    loading.download = false
-  }
-}
-</script>
 
 <style scoped>
 .page-header {
@@ -191,33 +151,59 @@ const handleDownload = async () => {
 }
 
 .page-header h1 {
-  margin: 0 0 8px 0;
+  margin: 0 0 8px;
   font-size: 24px;
   font-weight: 500;
 }
 
 .page-header p {
   margin: 0;
-  color: #666;
+  color: var(--el-text-color-secondary);
   font-size: 14px;
 }
+
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
-.db-operations {
-  padding: 20px 0;
+.schema-table + .schema-table {
+  margin-top: 16px;
 }
 
-.download-section {
-  margin-top: 20px;
+.schema-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
 }
 
-.download-section h3 {
-  margin: 0 0 20px 0;
-  font-size: 16px;
-  font-weight: 500;
+.muted {
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--el-text-color-secondary);
+}
+
+.diff-item + .diff-item {
+  margin-top: 16px;
+}
+
+.diff-columns {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+}
+
+.diff-xml {
+  margin: 0;
+  padding: 12px;
+  max-height: 280px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.6;
+  background: var(--el-fill-color-light);
+  border-radius: var(--el-border-radius-base);
 }
 </style>

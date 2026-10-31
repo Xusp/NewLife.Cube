@@ -12,7 +12,6 @@
  * 运行：pnpm test:unit core/views/modals/list-form-dialog/openListFormDialog.spec.ts
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ElMessage } from 'element-plus';
 import { openListFormDialog } from './openListFormDialog';
 import type { FieldMeta } from '../../../types/field';
 
@@ -96,7 +95,7 @@ describe('openListFormDialog', () => {
       method: 'post',
       data: { Enable: false },
     });
-    expect(mocks.ElMessage.success).toHaveBeenCalledWith('新增成功');
+    expect(mocks.ElMessage.success).toHaveBeenCalledWith('Added successfully');
     expect(onSuccess).toHaveBeenCalledOnce();
 
     // onConfirm 返回 true（允许关闭）
@@ -127,11 +126,11 @@ describe('openListFormDialog', () => {
     await modalOptions.onConfirm();
 
     expect(requestMock).toHaveBeenCalledWith({
-      url: '/api/test',
+      url: '/api/test/1',
       method: 'put',
       data: { id: 1, Name: 'old', Enable: true },
     });
-    expect(mocks.ElMessage.success).toHaveBeenCalledWith('更新成功');
+    expect(mocks.ElMessage.success).toHaveBeenCalledWith('Updated successfully');
     expect(onSuccess).toHaveBeenCalledOnce();
     await expect(promise).resolves.toBe(true);
   });
@@ -139,7 +138,7 @@ describe('openListFormDialog', () => {
   it('API 请求失败 → onConfirm 返回 false（阻止弹窗关闭）', async () => {
     requestMock.mockRejectedValue(new Error('Network Error'));
 
-    const promise = openListFormDialog({
+    openListFormDialog({
       title: '失败测试',
       fields: FIELDS,
       apiPrefix: '/api/test',

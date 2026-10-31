@@ -18,8 +18,8 @@ public partial class EntityController<TEntity, TModel>
 {
     #region 默认Action
     /// <summary>删除</summary>
-    /// <param name="id"></param>
-    /// <returns></returns>
+    /// <param name="id">主键</param>
+    /// <returns>删除后重定向到列表页</returns>
     [EntityAuthorize(PermissionFlags.Delete)]
     [DisplayName("删除{type}")]
     public virtual ActionResult Delete(String id)
@@ -51,12 +51,12 @@ public partial class EntityController<TEntity, TModel>
     }
 
     /// <summary>表单，添加/修改</summary>
-    /// <returns></returns>
+    /// <returns>新增表单视图</returns>
     [EntityAuthorize(PermissionFlags.Insert)]
     [DisplayName("添加{type}")]
     public virtual ActionResult Add()
     {
-        var entity = Factory.Create(true) as TEntity;
+        var entity = CreateNewEntity();
 
         // 填充QueryString参数
         var qs = Request.Query;
@@ -89,8 +89,8 @@ public partial class EntityController<TEntity, TModel>
     }
 
     /// <summary>保存</summary>
-    /// <param name="model"></param>
-    /// <returns></returns>
+    /// <param name="model">提交的表单模型</param>
+    /// <returns>保存成功后重定向到列表页；失败时回填表单并提示错误</returns>
     [EntityAuthorize(PermissionFlags.Insert)]
     [HttpPost]
     public virtual async Task<ActionResult> Add(TModel model)
@@ -99,7 +99,7 @@ public partial class EntityController<TEntity, TModel>
         // 实例化实体对象，然后拷贝
         if (model is not TEntity entity)
         {
-            entity = Factory.Create(true) as TEntity;
+            entity = CreateNewEntity();
 
             if (entity is IEntity<TModel> entity2)
                 entity2.Copy(model);
@@ -111,12 +111,12 @@ public partial class EntityController<TEntity, TModel>
 
         // 检测避免乱用Add/id
         if (Factory.Unique.IsIdentity && entity[Factory.Unique.Name].ToInt() != 0)
-            throw new Exception("我们约定添加数据时路由id部分默认没有数据，以免模型绑定器错误识别！");
+            throw new Exception("When adding via POST, the route id part must be empty, otherwise the model binder misreads it!");
 
         try
         {
             if (!Valid(entity, DataObjectMethodType.Insert, true))
-                throw new Exception("验证失败");
+                throw new Exception("Validation failed");
 
             OnInsert(entity);
 
@@ -148,7 +148,7 @@ public partial class EntityController<TEntity, TModel>
             return View("AddForm", entity);
         }
 
-        ViewBag.StatusMessage = "添加成功！";
+        ViewBag.StatusMessage = "Added successfully!";
 
         if (IsJsonRequest) return Json(0, ViewBag.StatusMessage);
 
@@ -160,13 +160,13 @@ public partial class EntityController<TEntity, TModel>
 
     /// <summary>表单，添加/修改</summary>
     /// <param name="id">主键。可能为空（表示添加），所以用字符串而不是整数</param>
-    /// <returns></returns>
+    /// <returns>编辑表单视图</returns>
     [EntityAuthorize(PermissionFlags.Update)]
     [DisplayName("更新{type}")]
     public virtual ActionResult Edit(String id)
     {
         var entity = FindData(id);
-        if (entity == null || (entity as IEntity).IsNullKey) throw new XException("要编辑的数据[{0}]不存在！", id);
+        if (entity == null || (entity as IEntity).IsNullKey) throw new XException("Data [{0}] to edit does not exist!", id);
 
         // 验证数据权限
         Valid(entity, DataObjectMethodType.Update, false);
@@ -192,8 +192,8 @@ public partial class EntityController<TEntity, TModel>
     }
 
     /// <summary>保存</summary>
-    /// <param name="model"></param>
-    /// <returns></returns>
+    /// <param name="model">提交的表单模型</param>
+    /// <returns>保存成功后重定向到列表页；失败时回填表单并提示错误</returns>
     [EntityAuthorize(PermissionFlags.Update)]
     [HttpPost]
     public virtual async Task<ActionResult> Edit(TModel model)
@@ -222,7 +222,7 @@ public partial class EntityController<TEntity, TModel>
         try
         {
             if (!Valid(entity, DataObjectMethodType.Update, true))
-                throw new Exception("验证失败");
+                throw new Exception("Validation failed");
 
             await SaveFiles(entity);
 
@@ -250,7 +250,7 @@ public partial class EntityController<TEntity, TModel>
         }
         else
         {
-            ViewBag.StatusMessage = "保存成功！";
+            ViewBag.StatusMessage = "Saved successfully!";
 
             if (IsJsonRequest) return Json(0, ViewBag.StatusMessage);
 
@@ -270,7 +270,7 @@ public partial class EntityController<TEntity, TModel>
     /// <summary>批量启用</summary>
     /// <param name="keys">主键集合</param>
     /// <param name="reason">操作原因</param>
-    /// <returns></returns>
+    /// <returns>批量启用结果 JSON，含成功与失败行数</returns>
     [EntityAuthorize(PermissionFlags.Update)]
     public virtual ActionResult EnableSelect(String keys, String reason)
     {
@@ -281,7 +281,7 @@ public partial class EntityController<TEntity, TModel>
     /// <summary>批量禁用</summary>
     /// <param name="keys">主键集合</param>
     /// <param name="reason">操作原因</param>
-    /// <returns></returns>
+    /// <returns>批量禁用结果 JSON，含成功与失败行数</returns>
     [EntityAuthorize(PermissionFlags.Update)]
     public virtual ActionResult DisableSelect(String keys, String reason)
     {
@@ -292,15 +292,15 @@ public partial class EntityController<TEntity, TModel>
 
     #region 高级Action
     /// <summary>高级开发接口</summary>
-    /// <param name="act"></param>
-    /// <returns></returns>
+    /// <param name="act">动作：Backup/BackupAndExport/Restore/Clear 等，其它值交给基类处理</param>
+    /// <returns>高级动作执行结果</returns>
     /// <exception cref="InvalidOperationException"></exception>
     public override async Task<ActionResult> Develop(String act)
     {
-        if (!NewLife.Common.SysConfig.Current.Develop) throw new InvalidOperationException("仅支持开发模式下使用！");
+        if (!NewLife.Common.SysConfig.Current.Develop) throw new InvalidOperationException("Only available in development mode!");
 
         var user = ManageProvider.User;
-        if (user == null || !user.Roles.Any(e => e.IsSystem)) throw new InvalidOperationException("仅支持系统管理员使用！");
+        if (user == null || !user.Roles.Any(e => e.IsSystem)) throw new InvalidOperationException("Only available to system administrators!");
 
         return act switch
         {
@@ -310,7 +310,7 @@ public partial class EntityController<TEntity, TModel>
     }
 
     /// <summary>导入Excel</summary>
-    /// <returns></returns>
+    /// <returns>导入结果 JSON，含成功与失败行数</returns>
     [EntityAuthorize(PermissionFlags.Insert)]
     [DisplayName("导入Excel")]
     [Obsolete("=>ImportFile")]
@@ -321,7 +321,7 @@ public partial class EntityController<TEntity, TModel>
             var fact = Factory;
             var rs = ImportExcel(file.FileName, file.OpenReadStream(), fact, GetCachePager());
 
-            var msg = $"导入[{file.FileName}]，成功[{rs}]行！";
+            var msg = $"Imported [{file.FileName}], {rs} rows succeeded!";
             return JsonRefresh(msg, 2);
         }
         catch (Exception ex)
@@ -329,28 +329,28 @@ public partial class EntityController<TEntity, TModel>
             DefaultSpan.Current?.SetError(ex);
             XTrace.WriteException(ex);
 
-            WriteLog("导入Excel", false, ex.GetMessage());
+            WriteLog(L.TLog("Import Excel"), false, ex.GetMessage());
 
             return Json(500, ex.GetMessage(), ex);
         }
     }
 
     /// <summary>修改bool值</summary>
-    /// <param name="id"></param>
-    /// <param name="valName"></param>
-    /// <param name="val"></param>
-    /// <returns></returns>
+    /// <param name="id">主键</param>
+    /// <param name="valName">待修改的布尔字段名</param>
+    /// <param name="val">目标布尔值</param>
+    /// <returns>更新结果 JSON，含受影响行数</returns>
     [EntityAuthorize(PermissionFlags.Update)]
     public ActionResult SetBool(Int32 id = 0, String valName = "", Boolean val = true)
     {
         var fi = Factory.Fields.FirstOrDefault(e => e.Name.EqualIgnoreCase(valName));
-        if (fi == null) throw new InvalidOperationException($"未找到{valName}字段。");
+        if (fi == null) throw new InvalidOperationException($"Field [{valName}] not found.");
 
         var rs = 0;
         if (id > 0)
         {
             var entity = FindData(id);
-            if (entity == null) throw new ArgumentNullException(nameof(id), "找不到任务 " + id);
+            if (entity == null) throw new ArgumentNullException(nameof(id), "Record not found: " + id);
 
             //entity.Enable = enable;
             entity.SetItem(fi.Name, val);
@@ -373,23 +373,23 @@ public partial class EntityController<TEntity, TModel>
                 }
             }
         }
-        return JsonRefresh($"操作成功！共更新[{rs}]行！");
+        return JsonRefresh($"Succeeded! [{rs}] rows updated!");
     }
 
     /// <summary>启用 或 禁用</summary>
-    /// <param name="id"></param>
-    /// <param name="enable"></param>
-    /// <returns></returns>
+    /// <param name="id">主键</param>
+    /// <param name="enable">是否启用</param>
+    /// <returns>更新结果 JSON</returns>
     [EntityAuthorize(PermissionFlags.Update)]
     public virtual ActionResult SetEnable(Int64 id = 0, Boolean enable = true)
     {
         var fi = Factory.Fields.FirstOrDefault(e => e.Name.EqualIgnoreCase("Enable"));
-        if (fi == null) throw new InvalidOperationException($"启用/禁用仅支持Enable字段。");
+        if (fi == null) throw new InvalidOperationException($"Enable/disable only supports the Enable field.");
 
         var rs = 0;
         if (id > 0)
         {
-            var entity = FindData(id) ?? throw new ArgumentNullException(nameof(id), "找不到任务 " + id);
+            var entity = FindData(id) ?? throw new ArgumentNullException(nameof(id), "Record not found: " + id);
 
             if (OnSetField(entity, fi.Name, enable))
                 rs += OnUpdate(entity);
@@ -409,13 +409,13 @@ public partial class EntityController<TEntity, TModel>
             }
         }
 
-        return JsonRefresh($"操作成功！共更新[{rs}]行！");
+        return JsonRefresh($"Succeeded! [{rs}] rows updated!");
     }
     #endregion
 
     #region 批量删除
     /// <summary>删除选中</summary>
-    /// <returns></returns>
+    /// <returns>删除结果 JSON，含成功与失败行数</returns>
     [EntityAuthorize(PermissionFlags.Delete)]
     [DisplayName("删除选中")]
     public virtual ActionResult DeleteSelect()
@@ -461,7 +461,7 @@ public partial class EntityController<TEntity, TModel>
     }
 
     /// <summary>删除全部</summary>
-    /// <returns></returns>
+    /// <returns>删除全部结果 JSON，含成功与失败行数</returns>
     [EntityAuthorize(PermissionFlags.Delete)]
     [DisplayName("删除全部")]
     public virtual ActionResult DeleteAll()
@@ -526,7 +526,7 @@ public partial class EntityController<TEntity, TModel>
     #region 导入Excel/Csv/Json/Zip
     /// <summary>导入文件（Excel/Csv/Json/Zip），然后批量写入数据库</summary>
     /// <param name="file">上传的zip文件</param>
-    /// <returns></returns>
+    /// <returns>导入结果 JSON，含成功与失败行数</returns>
     [HttpPost]
     [EntityAuthorize(PermissionFlags.Insert)]
     [DisplayName("导入Excel/Csv/Json/Zip")]
@@ -534,7 +534,7 @@ public partial class EntityController<TEntity, TModel>
     {
         if (file == null || file.Length <= 0) return RedirectToAction("Index");
 
-        WriteLog(nameof(ImportFile), true, $"开始导入文件[{file.FileName}]，大小[{file.Length:n0}]字节，类型[{file.ContentType}]");
+        WriteLog(nameof(ImportFile), true, L.TLog("Start importing file [{0}], size [{1:n0}] bytes, type [{2}]", file.FileName, file.Length, file.ContentType));
 
         var factory = Factory;
         var page = GetCachePager();
@@ -547,9 +547,9 @@ public partial class EntityController<TEntity, TModel>
             ".csv" => ImportCsv(name, stream, factory, page),
             ".json" => ImportJson(name, stream, factory, page),
             ".zip" => ImportZip(name, stream, factory, page),
-            _ => throw new NotSupportedException($"不支持的导入文件类型[{ext}]"),
+            _ => throw new NotSupportedException($"Unsupported import file type [{ext}]"),
         };
-        var msg = $"导入[{name}] 共{rs}行";
+        var msg = $"Imported [{name}], total {rs} rows";
         //WriteLog("导入" + ext.TrimStart('.'), true, msg);
 
         return JsonRefresh(msg, 3);
@@ -561,7 +561,7 @@ public partial class EntityController<TEntity, TModel>
     private static readonly HttpClient _httpClient = new();
 
     /// <summary>同步数据</summary>
-    /// <returns></returns>
+    /// <returns>同步结果；具体行为由派生控制器决定</returns>
     [NonAction]
     public async Task<ActionResult> Sync()
     {
@@ -574,9 +574,9 @@ public partial class EntityController<TEntity, TModel>
         var token = ps.FirstOrDefault(e => e.Name == "Token")?.Value;
         var models = ps.FirstOrDefault(e => e.Name == "Models")?.Value;
 
-        if (server.IsNullOrEmpty()) throw new ArgumentNullException("未配置 Sync:Server");
-        if (token.IsNullOrEmpty()) throw new ArgumentNullException("未配置 Sync:Token");
-        if (models.IsNullOrEmpty()) throw new ArgumentNullException("未配置 Sync:Models");
+        if (server.IsNullOrEmpty()) throw new ArgumentNullException("Sync:Server is not configured");
+        if (token.IsNullOrEmpty()) throw new ArgumentNullException("Sync:Token is not configured");
+        if (models.IsNullOrEmpty()) throw new ArgumentNullException("Sync:Models is not configured");
 
         var mds = models.Split(",");
 
@@ -588,24 +588,36 @@ public partial class EntityController<TEntity, TModel>
         // 找到控制器，以识别动作地址
         var cs = GetControllerAction();
         var ctrl = cs[0].IsNullOrEmpty() ? cs[1] : $"{cs[0]}/{cs[1]}";
-        if (!mds.Contains(ctrl)) throw new InvalidOperationException($"[{ctrl}]未配置为允许同步 Sync:Models");
+        if (!mds.Contains(ctrl)) throw new InvalidOperationException($"[{ctrl}] is not allowed to sync, check Sync:Models");
 
-        // 复用静态 HttpClient，避免每次同步创建连接导致端口耗尽
-        var url = server.EnsureEnd("/") + $"{ctrl}/Json/{token}?PageSize=100000";
+        // 服务端 pageSize 有上限（Pager.MaxPageSize），单次请求拉不走整表，改为按页循环拉取
+        var fact = Factory;
+        var pageSize = Pager.MaxPageSize;
+        var list = new List<TEntity>();
 
         var sw = Stopwatch.StartNew();
+        var url = "";
+        for (var pageIndex = 1; ; pageIndex++)
+        {
+            // 防御：正常实体不可能跑到这么多页，避免服务端忽略 PageIndex 时死循环
+            if (pageIndex > 10_000) throw new InvalidOperationException($"Too many pages while syncing [{ctrl}], aborted at page {pageIndex}");
 
-        var list = await _httpClient.InvokeAsync<TEntity[]>(HttpMethod.Get, url);
+            url = server.EnsureEnd("/") + $"{ctrl}/Json/{token}?PageSize={pageSize}&PageIndex={pageIndex}";
+            var page = await _httpClient.InvokeAsync<TEntity[]>(HttpMethod.Get, url);
+            if (page == null || page.Length == 0) break;
+
+            list.AddRange(page);
+            if (page.Length < pageSize) break;
+        }
 
         sw.Stop();
 
-        var fact = Factory;
-        XTrace.WriteLine("[{0}]共同步数据[{1:n0}]行，耗时{2:n0}ms，数据源：{3}", fact.EntityType.FullName, list.Length, sw.ElapsedMilliseconds, url);
+        XTrace.WriteLine(L.TLog("[{0}] synchronized [{1:n0}] rows in {2:n0}ms, source: {3}", fact.EntityType.FullName, list.Count, sw.ElapsedMilliseconds, url));
 
         var arrType = fact.EntityType.MakeArrayType();
-        if (list.Length > 0)
+        if (list.Count > 0)
         {
-            XTrace.WriteLine("[{0}]准备覆盖写入[{1}]行数据", fact.EntityType.FullName, list.Length);
+            XTrace.WriteLine(L.TLog("[{0}] preparing to overwrite [{1}] rows", fact.EntityType.FullName, list.Count));
             using var tran = fact.Session.CreateTrans();
 
             // 清空

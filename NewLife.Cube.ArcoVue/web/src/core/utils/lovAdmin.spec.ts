@@ -12,7 +12,7 @@ import {
   lovTypeLabel,
   validateLovCode,
 } from './lovAdmin';
-import { Auth } from '@newlifex/page-utils';
+import { Auth } from '@newlifex/cube';
 
 describe('lovPermFlags', () => {
   it('权限空对象 → 三个按钮都允许', () => {

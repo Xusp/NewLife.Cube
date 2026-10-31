@@ -20,8 +20,8 @@ public class AISecurityReportJob : CubeJobBase
 
     #region 构造
     /// <summary>实例化</summary>
-    /// <param name="ai"></param>
-    /// <param name="tracer"></param>
+    /// <param name="ai">AI 服务，用于生成安全巡检报告</param>
+    /// <param name="tracer">链路追踪器</param>
     public AISecurityReportJob(IAIService ai, ITracer tracer)
     {
         _ai = ai;
@@ -31,14 +31,14 @@ public class AISecurityReportJob : CubeJobBase
 
     #region 方法
     /// <summary>执行</summary>
-    /// <param name="argument"></param>
-    /// <returns></returns>
+    /// <param name="argument">作业参数，当前未使用</param>
+    /// <returns>执行结果描述，写入作业日志</returns>
     public override async Task<String> Execute(String argument)
     {
         using var span = _tracer?.NewSpan(nameof(AISecurityReportJob));
 
         var set = CubeSetting.Current;
-        if (!set.AISwitch) return "AI 未启用，跳过";
+        if (!set.AISwitch) return L.T("AI is not enabled; skipped");
 
         var now = DateTime.Now;
         var start = now.AddDays(-7);
@@ -68,28 +68,28 @@ public class AISecurityReportJob : CubeJobBase
             }),
         }.ToJson();
 
-        var result = await _ai.ChatAsync(@"你是信息安全专家。根据以下系统安全数据，生成安全态势分析周报（中文）：
-1. 整体安全态势评估
-2. 需要关注的风险点
-3. 建议采取的安全措施
+        var result = await _ai.ChatAsync(L.T(@"You are an information security expert. Based on the following security data, write a weekly security report covering:
+1. Overall security posture
+2. Risks that need attention
+3. Recommended security measures
 
-直接输出周报，不要加无关解释。", securityData);
+Output the report directly without extra explanation."), securityData);
 
         // 推送站内信通知
         var record = new NotificationRecord
         {
             Action = "AI_SecurityReport",
             Channel = "InApp",
-            Title = $"安全分析周报 {start:yyyy-MM-dd} ~ {now:yyyy-MM-dd}",
+            Title = L.T("Security weekly report {0} ~ {1}", start.ToString("yyyy-MM-dd"), now.ToString("yyyy-MM-dd")),
             Content = result,
             Success = true,
-            Result = $"分析 {oauthLogs.Count} 条 OAuth 日志",
+            Result = L.T("Analyzed {0} OAuth log entries", oauthLogs.Count),
         };
         record.Insert();
 
         span?.AppendTag(result);
 
-        return $"安全分析周报完成，OAuth {oauthLogs.Count}/{failCount}";
+        return L.T("Security weekly report completed, OAuth {0}/{1}", oauthLogs.Count, failCount);
     }
     #endregion
 }

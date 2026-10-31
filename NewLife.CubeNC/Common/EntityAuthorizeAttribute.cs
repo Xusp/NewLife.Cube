@@ -23,23 +23,38 @@ namespace NewLife.Cube;
 public class EntityAuthorizeAttribute : Attribute, IAuthorizationFilter
 {
     #region 属性
-    /// <summary>授权项</summary>
+    /// <summary>授权项。多授权项时取第一个，用于菜单权限项展示</summary>
     public PermissionFlags Permission { get; }
+
+    /// <summary>授权项集合。多个授权项之间是“或”的关系；全部为 None 时表示只需登录</summary>
+    public PermissionFlags[] Permissions { get; } = [PermissionFlags.None];
     #endregion
 
     #region 构造
-    static EntityAuthorizeAttribute() => XTrace.WriteLine("注册过滤器：{0}", typeof(EntityAuthorizeAttribute).FullName);
+    static EntityAuthorizeAttribute() => XTrace.WriteLine(L.TLog("Register filter: {0}", typeof(EntityAuthorizeAttribute).FullName));
 
-    /// <summary>实例化实体授权特性</summary>
+    /// <summary>实例化实体授权特性。只需登录，不校验具体权限位</summary>
     public EntityAuthorizeAttribute() { }
 
     /// <summary>实例化实体授权特性</summary>
     /// <param name="permission"></param>
     public EntityAuthorizeAttribute(PermissionFlags permission)
     {
-        if (permission < PermissionFlags.None) throw new ArgumentNullException(nameof(permission));
+        // None 表示只需登录，All(-1) 为合法的全权限组合；仅拒绝未知负值
+        if (permission < PermissionFlags.None && permission != PermissionFlags.All) throw new ArgumentNullException(nameof(permission));
 
         Permission = permission;
+        Permissions = [permission];
+    }
+
+    /// <summary>实例化实体授权特性。多个授权项之间是“或”的关系</summary>
+    /// <param name="permissions"></param>
+    public EntityAuthorizeAttribute(params PermissionFlags[] permissions)
+    {
+        if (permissions == null || permissions.Length == 0) throw new ArgumentNullException(nameof(permissions));
+
+        Permissions = permissions;
+        Permission = permissions[0];
     }
     #endregion
 
@@ -102,20 +117,20 @@ public class EntityAuthorizeAttribute : Attribute, IAuthorizationFilter
         if (user == null) return false;
 
         // 如果没有指定权限，则只要登录即可
-        if (Permission == PermissionFlags.None) return true;
+        if (Permissions.All(e => e == PermissionFlags.None)) return true;
 
-        // 判断权限
+        // 判断权限（多个授权项之间是“或”的关系）
         if (menu != null)
         {
-            if (user is IUser user2) return user2.Has(menu, Permission);
+            if (user is IUser user2) return user2.Has(menu, Permissions);
 
             var msg = $"访问资源[{menu}]时无法验证用户[{user}]的权限";
-            LogProvider.Provider.WriteLog("访问", "拒绝", false, msg, ip: ctx.GetUserHost());
+            LogProvider.Provider.WriteLog(L.TLog("Access"), L.TLog("Deny"), false, msg, ip: ctx.GetUserHost());
             DefaultSpan.Current?.AppendTag(msg);
         }
         else
         {
-            LogProvider.Provider.WriteLog("访问", "拒绝", false, "无法找到菜单", ip: ctx.GetUserHost());
+            LogProvider.Provider.WriteLog(L.TLog("Access"), L.TLog("Deny"), false, L.TLog("Cannot find the menu"), ip: ctx.GetUserHost());
         }
 
         return false;
@@ -161,8 +176,8 @@ public class EntityAuthorizeAttribute : Attribute, IAuthorizationFilter
         var ctx = filterContext.HttpContext;
 
         var res = $"[{ctrl.ControllerName}/{act.ActionName}]";
-        var msg = $"{user}访问资源 {res} 需要 {permission.GetDescription()} 权限";
-        LogProvider.Provider.WriteLog("访问", "拒绝", false, msg, ip: ctx.GetUserHost());
+        var msg = L.T("User {0} accessing resource {1} requires {2} permission.", user, res, L.T(permission.GetDescription()));
+        LogProvider.Provider.WriteLog(L.TLog("Access"), L.TLog("Deny"), false, msg, ip: ctx.GetUserHost());
         DefaultSpan.Current?.AppendTag(msg);
 
         if (filterContext.HttpContext.Request.IsAjaxRequest())
@@ -217,7 +232,7 @@ public class EntityAuthorizeAttribute : Attribute, IAuthorizationFilter
             if (CreateMenu(type)) menu = mf.FindByFullName(fullName);
         }
 
-        if (menu == null) XTrace.WriteLine("设计错误！验证权限时无法找到[{0}/{1}]的菜单", type.FullName, act.ActionName);
+        if (menu == null) XTrace.WriteLine(L.TLog("Design error! Cannot find menu for [{0}/{1}] during permission check", type.FullName, act.ActionName));
 
         return menu;
     }

@@ -66,7 +66,7 @@ public class SsoServerService : ISsoServerService
             app = AppService.Auth(client_id, null, ip);
             log.AppId = app.Id;
 
-            if (!app.ValidCallback(redirect_uri)) throw new XException("回调地址不合法 {0}", redirect_uri);
+            if (!app.ValidCallback(redirect_uri)) throw new XException("Invalid callback URL [{0}].", redirect_uri);
 
             app.Auths++;
             app.LastAuth = DateTime.Now;
@@ -96,7 +96,7 @@ public class SsoServerService : ISsoServerService
     public virtual String GetResult(String key, IManageUser user)
     {
         var log = AppLog.FindById(key.ToLong());
-        if (log == null) throw new ArgumentOutOfRangeException(nameof(key), "操作超时，请重试！");
+        if (log == null) throw new ArgumentOutOfRangeException(nameof(key), L.T("The operation timed out. Please try again."));
 
         var code = log.Id + "";
 
@@ -116,7 +116,7 @@ public class SsoServerService : ISsoServerService
             if (!user2.Roles.Any(r => ids.Contains(r.ID)))
             {
                 log.Success = false;
-                log.Remark = $"该应用[{log.AppName}]不支持用户所属角色登录！";
+                log.Remark = L.T("Application [{0}] does not support signing in with the user's role!", log.AppName);
                 log.Update();
 
                 throw new InvalidOperationException(log.Remark);

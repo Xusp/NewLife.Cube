@@ -6,7 +6,6 @@ import { useMenuStore } from '../stores/menu';
 import { getAccessToken } from '../utils/token';
 import { getUrlHashToken } from '../utils/token';
 import { registerMenuRoutes } from '../utils/menuRoutes';
-import { normalizeMenuUrl, type RouteNamingStyle } from '../utils/url';
 import { getConfig } from '../configure';
 import { addFrameworkRoute, bindRoutePriority } from './routeOverride';
 
@@ -40,7 +39,7 @@ const loginPageUrl = reLoginParams?.loginPageUrl || '/login';
 // 先初始化微前端应用路由（异步操作）
 // 我们不会等待其完成再导出router，但会在导航守卫中检查初始化状态
 initAppRoutes(router).catch((error) => {
-  console.error('初始化微应用路由失败:', error);
+  console.error('Failed to initialize micro-app routes:', error);
 });
 
 // 全局导航守卫
@@ -71,7 +70,7 @@ router.beforeEach(async (to, from, next) => {
   // 检查微应用路由是否已初始化完成
   if (!isRoutesInitialized()) {
     // 可以选择显示加载页面或重定向到特定页面
-    console.log('等待微应用路由初始化完成...');
+    console.log('Waiting for micro-app route initialization...');
     // 可以添加一个加载中的页面
     return next({ path: '/loading', query: { redirect: to.fullPath } });
   }
@@ -102,7 +101,7 @@ router.beforeEach(async (to, from, next) => {
         await userStore.fetchUserInfoAsync();
       } catch (error) {
         // 获取用户信息失败，可能是token无效，跳转到登录页
-        console.error('获取用户信息失败:', error);
+        console.error('Failed to get user info:', error);
         next({ path: loginPageUrl });
         return;
       }
@@ -113,7 +112,7 @@ router.beforeEach(async (to, from, next) => {
       try {
         await menuStore.fetchMenuAsync();
       } catch (error) {
-        console.error('获取菜单信息失败:', error);
+        console.error('Failed to get menu info:', error);
         // 获取菜单失败但不影响导航，继续放行
       }
     }

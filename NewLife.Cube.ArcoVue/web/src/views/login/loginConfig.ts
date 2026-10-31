@@ -1,4 +1,4 @@
-import type { LoginConfig, OAuthProvider } from '@newlifex/api-core';
+import type { LoginConfig, OAuthProvider } from '@newlifex/cube';
 
 export type LoginTabKey = 'password' | 'sms' | 'mail';
 
@@ -91,8 +91,9 @@ export function needLoginCaptcha(cfg: LoginConfig | null | undefined): boolean {
 
 /** 发短信/邮件验证码前是否需要图片验证码（CaptchaScene 位 4） */
 export function needSendCodeCaptcha(cfg: LoginConfig | null | undefined): boolean {
-  const login = cfg?.login as { sendCodeCaptcha?: boolean; SendCodeCaptcha?: boolean } | undefined;
-  return !!(login?.sendCodeCaptcha ?? login?.SendCodeCaptcha);
+  // 后端字段为 SendCode，序列化后是 sendCode；兼容旧皮肤曾读取的 sendCodeCaptcha
+  const login = cfg?.login as { sendCode?: boolean; sendCodeCaptcha?: boolean } | undefined;
+  return !!(login?.sendCode ?? login?.sendCodeCaptcha);
 }
 
 export function needChallenge(cfg: LoginConfig | null | undefined): boolean {

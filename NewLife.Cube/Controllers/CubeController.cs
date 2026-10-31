@@ -9,7 +9,10 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Mvc.Filters;
 using NewLife.Cube.Areas.Cube.Controllers;
+using NewLife.Cube.Attributes;
 using NewLife.Cube.Entity;
+using NewLife.Cube.Membership;
+using NewLife.Cube.Models;
 using NewLife.Cube.Services;
 using NewLife.Cube.Widgets;
 using NewLife.Cube.Web;
@@ -31,9 +34,9 @@ namespace NewLife.Cube.Controllers;
 /// <param name="pageService"></param>
 /// <param name="tokenService"></param>
 /// <param name="sources"></param>
-[DisplayName("魔方数据接口")]
+[DisplayName("Cube data API")]
 [Description("""
-    魔方向前端控件提供的一些常用接口，例如用户查询与头像获取等。
+    Common APIs that Cube provides to front-end controls, such as user lookup and avatar retrieval.
     """)]
 //[ApiExplorerSettings(GroupName = "Cube")]
 [Route("[controller]/[action]")]
@@ -58,7 +61,7 @@ public class CubeController(PageService pageService, TokenService tokenService, 
             // 1) 接受 json -> 返回 Json 封装的401
             if (accept.Contains("json"))
             {
-                context.Result = Json(401, "未授权");
+                context.Result = Json(401, L.T("Unauthorized"));
                 return;
             }
             // 2) 接受二进制下载或HTML -> 返回HTTP 401状态码
@@ -150,16 +153,67 @@ public class CubeController(PageService pageService, TokenService tokenService, 
     }
     #endregion
 
+    #region 站点配置
+    /// <summary>获取站点配置。为登录页与前台页面提供匿名可缓存的品牌、语言与功能开关</summary>
+    /// <param name="tenant">租户标识，支持编号、编码或名称；为空时取当前请求上下文</param>
+    /// <returns>站点配置</returns>
+    [AllowAnonymous]
+    [HttpGet]
+    [RateLimit]
+    public ActionResult Site(String tenant = null)
+    {
+        var model = new SiteConfigModel(ResolveTenant(tenant));
+
+        // 站点配置按语言与租户公共缓存，条件请求命中时返回 304
+        var notModified = CheckNotModified(model);
+        Response.Headers["Cache-Control"] = "public, max-age=60";
+        Response.Headers["Vary"] = "Accept-Language, X-Tenant, X-App-Id, Cookie";
+        if (notModified) return new EmptyResult();
+
+        return Json(0, null, model);
+    }
+
+    private static ITenant ResolveTenant(String tenant)
+    {
+        if (!tenant.IsNullOrEmpty())
+        {
+            if (Int32.TryParse(tenant, out var id)) return Tenant.FindById(id);
+
+            return Tenant.FindByCode(tenant) ?? Tenant.Find(Tenant._.Name == tenant);
+        }
+
+        return TenantContext.Current?.Tenant;
+    }
+    #endregion
+
     #region 服务器信息
     private static readonly String _OS = Environment.OSVersion + "";
 
-    /// <summary>服务器信息，用户健康检测</summary>
+    /// <summary>健康检测。匿名可访问的最小信息，供探针与负载均衡器使用，不暴露服务器指纹</summary>
+    /// <param name="state">状态信息。可选，原样回显用于校验请求链路</param>
+    /// <returns>仅包含 status/time/state</returns>
+    [AllowAnonymous]
+    [HttpGet]
+    public ActionResult Health(String state = null)
+    {
+        var rs = new
+        {
+            status = "ok",
+            time = DateTime.Now,
+            state,
+        };
+
+        return Json(0, null, rs);
+    }
+
+    /// <summary>服务器信息。仅系统管理员可访问，避免匿名泄露操作系统、端口与版本指纹</summary>
     /// <param name="state">状态信息。可选，用于回显校验</param>
     /// <returns></returns>
-    [AllowAnonymous]
     [HttpGet]
     public ActionResult Info(String state = null)
     {
+        if (!IsSystemAdmin()) return Json(403, L.T("Only available to system administrators."));
+
         var asmx = AssemblyX.Entry;
         var conn = HttpContext.Connection;
         var remote = conn.RemoteIpAddress;
@@ -183,15 +237,23 @@ public class CubeController(PageService pageService, TokenService tokenService, 
 
         return Json(0, null, rs);
     }
+
+    private static Boolean IsSystemAdmin()
+    {
+        var user = ManageProvider.User;
+        return user != null && user.Roles.Any(e => e.IsSystem);
+    }
     #endregion
 
     #region 接口信息
-    /// <summary>获取所有接口信息</summary>
-    /// <returns></returns>
-    [AllowAnonymous]
+    /// <summary>获取所有接口信息。需登录且系统管理员，并开启 CubeSetting.EnableApiExplorer</summary>
+    /// <returns>接口清单，不含参数类型名</returns>
     [HttpGet]
     public ActionResult Apis()
     {
+        if (!CubeSetting.Current.EnableApiExplorer) return Json(404, null);
+        if (!IsSystemAdmin()) return Json(403, L.T("Only available to system administrators."));
+
         var set = new List<EndpointDataSource>();
         var eps = new List<String>();
         foreach (var item in _sources)
@@ -200,18 +262,11 @@ public class CubeController(PageService pageService, TokenService tokenService, 
             {
                 set.Add(item);
 
-                //eps.AddRange(item.Endpoints);
                 foreach (var elm in item.Endpoints)
                 {
-                    var area = elm.Metadata.GetMetadata<AreaAttribute>();
-                    var disp = elm.Metadata.GetMetadata<DisplayNameAttribute>();
                     var desc = elm.Metadata.GetMetadata<ControllerActionDescriptor>();
                     var post = elm.Metadata.GetMetadata<HttpPostAttribute>();
                     if (desc == null) continue;
-
-                    //var name = area == null ?
-                    //    $"{desc.ControllerName}/{desc.ActionName}" :
-                    //    $"{area?.RouteValue}/{desc.ControllerName}/{desc.ActionName}";
 
                     var sb = new StringBuilder();
                     sb.Append(post != null ? "POST " : "GET ");
@@ -219,7 +274,8 @@ public class CubeController(PageService pageService, TokenService tokenService, 
                     sb.Append("/");
                     sb.Append(desc.ActionName);
                     sb.Append("(");
-                    sb.Append(desc.MethodInfo.GetParameters().Join(",", pi => $"{pi.ParameterType.Name} {pi.Name}"));
+                    // 只输出参数名，不输出类型名，避免泄露内部实体与类型结构
+                    sb.Append(desc.MethodInfo.GetParameters().Join(",", pi => pi.Name));
                     sb.Append(")");
 
                     var name = sb.ToString();
@@ -309,7 +365,7 @@ public class CubeController(PageService pageService, TokenService tokenService, 
     public ActionResult GetArea(Int32 id = 0)
     {
         var r = id <= 0 ? AreaX.Root : AreaX.FindByID(id);
-        if (r == null) return Json(500, null, "找不到地区");
+        if (r == null) return Json(500, null, L.T("Region not found."));
 
         return Json(0, null, new
         {
@@ -333,7 +389,7 @@ public class CubeController(PageService pageService, TokenService tokenService, 
         AreaController.InitAreaData();
 
         var r = id <= 0 ? AreaX.Root : AreaX.FindByID(id);
-        if (r == null) return Json(500, null, "找不到地区");
+        if (r == null) return Json(500, null, L.T("Region not found."));
 
         if (r.ID == 0)
             return Json(0, null, r.Childs.Where(e => e.Enable).Select(e => new { e.ID, e.Name, e.FullName, BigArea = e.GetBig() }).ToArray());
@@ -349,7 +405,7 @@ public class CubeController(PageService pageService, TokenService tokenService, 
     public ActionResult AreaParents(Int32 id = 0, Boolean isContainSelf = false)
     {
         var r = id <= 0 ? AreaX.Root : AreaX.FindByID(id);
-        if (r == null) return Json(500, null, "找不到地区");
+        if (r == null) return Json(500, null, L.T("Region not found."));
 
         var list = new List<Object>();
         foreach (var e in r.GetAllParents())
@@ -373,7 +429,7 @@ public class CubeController(PageService pageService, TokenService tokenService, 
     public ActionResult AreaAllParents(Int32 id = 0)
     {
         var r = id <= 0 ? AreaX.Root : AreaX.FindByID(id);
-        if (r == null) return Json(500, null, "找不到地区");
+        if (r == null) return Json(500, null, L.T("Region not found."));
 
         var rs = new List<AreaX>();
         foreach (var item in r.GetAllParents())
@@ -409,7 +465,7 @@ public class CubeController(PageService pageService, TokenService tokenService, 
         if (id <= 0) throw new ArgumentNullException(nameof(id));
 
         var user = ManageProvider.Provider?.FindByID(id) as IUser;
-        if (user == null) throw new Exception("用户不存在 " + id);
+        if (user == null) throw new Exception(L.T("User [{0}] does not exist.", id));
 
         var set = CubeSetting.Current;
         var av = "";
@@ -473,36 +529,50 @@ public class CubeController(PageService pageService, TokenService tokenService, 
     #endregion
 
     #region 页面配置
-    /// <summary>查询一批Code的数据源</summary>
-    /// <param name="codes"></param>
-    /// <returns></returns>
-    [AllowAnonymous]
+    /// <summary>查询一批Code的数据源。需登录，仅接受已加载程序集中的枚举类型</summary>
+    /// <param name="codes">枚举类型全名，逗号分隔，最多 20 个</param>
+    /// <returns>按 code 分组的选项字典</returns>
     [HttpGet]
+    [RateLimit]
     public ActionResult Lookup(String codes)
     {
+        if (codes.IsNullOrEmpty()) return Json(CubeCode.ParamError.ToInt(), L.T("Invalid request parameter"));
+        if (codes.Length > 2000) return Json(CubeCode.ParamError.ToInt(), L.T("{0} must not exceed {1} characters.", "codes", 2000));
+
+        var names = codes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (names.Length > MaxLookupCodes) return Json(CubeCode.ParamError.ToInt(), L.T("{0} must not exceed {1} characters.", "codes", MaxLookupCodes));
+
         var source = new Dictionary<String, Object>();
-        foreach (var code in codes.Split(","))
+        foreach (var code in names)
         {
-            var type = code.GetTypeEx();
+            // 只从已加载程序集索引枚举类型，避免 Type.GetType 按程序集限定名加载任意程序集
+            var type = LovRegistry.FindEnumType(code);
             if (type != null && type.IsEnum)
-            {
-                var ns = Enum.GetNames(type);
-                var vs = Enum.GetValues(type);
-                var list = new Dictionary<String, Object>[ns.Length];
-                for (var i = 0; i < ns.Length; i++)
-                {
-                    list[i] = new Dictionary<String, Object>
-                    {
-                        ["Label"] = ns[i],
-                        ["Value"] = vs.GetValue(i),
-                    };
-                }
-                source.Add(code, list);
-            }
+                source[code] = GetEnumOptions(code, type);
         }
 
         return Json(0, null, source);
     }
+
+    private const Int32 MaxLookupCodes = 20;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, Dictionary<String, Object>[]> _enumOptions = new();
+
+    private static Dictionary<String, Object>[] GetEnumOptions(String code, Type type) => _enumOptions.GetOrAdd(type, t =>
+    {
+        var ns = Enum.GetNames(t);
+        var vs = Enum.GetValues(t);
+        var list = new Dictionary<String, Object>[ns.Length];
+        for (var i = 0; i < ns.Length; i++)
+        {
+            list[i] = new Dictionary<String, Object>
+            {
+                ["Label"] = ns[i],
+                ["Value"] = vs.GetValue(i),
+            };
+        }
+
+        return list;
+    });
 
     ///// <summary>
     ///// 保存字典参数到后台
@@ -531,12 +601,12 @@ public class CubeController(PageService pageService, TokenService tokenService, 
     public ActionResult SaveLayout(Int32 userid, String category, String name, String value)
     {
         if (!category.EqualIgnoreCase("LayoutSetting"))
-            return Json(203, "非授权操作，不允许保存系统布局以外的信息");
+            return Json(203, L.T("This operation is not authorized; only system layout settings can be saved."));
 
         // 防水平越权：仅允许保存当前登录用户自己的布局；系统管理员可代用户设置
         var cur = ManageProvider.User;
         if (cur == null || userid != cur.ID && !cur.Roles.Any(e => e.IsSystem))
-            return Json(403, "仅能保存自己的布局设置");
+            return Json(403, L.T("You can only save your own layout settings."));
 
         var para = Parameter.GetOrAdd(userid, category, name);
         para.SetItem("Value", value);
@@ -642,9 +712,11 @@ public class CubeController(PageService pageService, TokenService tokenService, 
         var permissionedIds = Role.FindAllWithCache().SelectMany(r => r.Resources).ToArray();
 
         Boolean IsAccessible(IMenu m) => (allowedIds.Contains(m.ID) || !permissionedIds.Contains(m.ID))
-            && (allowTenant || !NewLife.Cube.Membership.MenuHelper.IsTenantMenu(m));
+            && (allowTenant || !NewLife.Cube.Membership.MenuHelper.IsTenantMenu(m))
+            // 跨宿主共享菜单数据时，隐藏本站点未部署控制器的菜单（如 MVC 版读到的“值集管理”）
+            && m.IsMenuAvailable();
 
-        menus = menus.Where(IsAccessible).ToList();
+        menus = NewLife.Cube.Membership.MenuHelper.FilterAvailable(menus.Where(IsAccessible).ToList());
 
         var menuTree = ViewModels.MenuTree.GetMenuTree(pMenuTree =>
         {
@@ -660,14 +732,14 @@ public class CubeController(PageService pageService, TokenService tokenService, 
                             {
                                 ID = menu.ID,
                                 Name = menu.Name,
-                                DisplayName = menu.DisplayName ?? menu.Name,
+                                DisplayName = NewLife.Cube.Membership.MenuHelper.GetDisplayName(menu),
                                 FullName = menu.FullName,
                                 Url = menu.Url,
                                 Icon = menu.Icon,
                                 Visible = menu.Visible,
                                 NewWindow = menu.NewWindow,
                                 ParentID = menu.ParentID,
-                                Permissions = menu.Permissions
+                                Permissions = NewLife.Cube.Membership.MenuHelper.GetPermissions(menu)
                             }).ToList();
             return menuList.Count > 0 ? menuList : null;
         }, menus);
@@ -685,14 +757,14 @@ public class CubeController(PageService pageService, TokenService tokenService, 
     [HttpGet]
     public async Task<ActionResult> Image(String id)
     {
-        if (id.IsNullOrEmpty()) return NotFound("非法附件编号");
+        if (id.IsNullOrEmpty()) return NotFound(L.T("Invalid attachment id."));
 
         // 去掉仅用于装饰的后缀名
         var p = id.IndexOf('.');
         if (p > 0) id = id[..p];
 
         var att = Attachment.FindById(id.ToLong());
-        if (att == null) return NotFound("找不到附件信息");
+        if (att == null) return NotFound(L.T("Attachment info not found."));
 
         // 细粒度附件访问权限校验
         var denied = CheckAttachmentAccess(att);
@@ -706,7 +778,7 @@ public class CubeController(PageService pageService, TokenService tokenService, 
         if (!att.IsLocalStorage())
         {
             var url = AttachmentProvider.Provider.GetUrl(att.FilePath);
-            if (url.IsNullOrEmpty()) return NotFound("找不到附件文件");
+            if (url.IsNullOrEmpty()) return NotFound(L.T("Attachment file not found."));
             return Redirect(url);
         }
 
@@ -715,14 +787,14 @@ public class CubeController(PageService pageService, TokenService tokenService, 
         if (filePath.IsNullOrEmpty() || !System.IO.File.Exists(filePath))
         {
             var url = att.Source;
-            if (url.IsNullOrEmpty()) return NotFound("找不到附件文件");
+            if (url.IsNullOrEmpty()) return NotFound(L.T("Attachment file not found."));
 
             var rs = await att.Fetch(url);
-            if (!rs) return NotFound("附件远程抓取失败");
+            if (!rs) return NotFound(L.T("Failed to fetch remote attachment."));
 
             filePath = att.GetFilePath();
         }
-        if (filePath.IsNullOrEmpty() || !System.IO.File.Exists(filePath)) return NotFound("附件文件不存在");
+        if (filePath.IsNullOrEmpty() || !System.IO.File.Exists(filePath)) return NotFound(L.T("Attachment file does not exist."));
 
         if (!att.ContentType.IsNullOrEmpty())
             return PhysicalFile(filePath, att.ContentType, att.FileName);
@@ -738,14 +810,14 @@ public class CubeController(PageService pageService, TokenService tokenService, 
     [HttpGet]
     public async Task<ActionResult> File(String id)
     {
-        if (id.IsNullOrEmpty()) return NotFound("非法附件编号");
+        if (id.IsNullOrEmpty()) return NotFound(L.T("Invalid attachment id."));
 
         // 去掉仅用于装饰的后缀名
         var p = id.IndexOf('.');
         if (p > 0) id = id[..p];
 
         var att = Attachment.FindById(id.ToLong());
-        if (att == null) return NotFound("找不到附件信息");
+        if (att == null) return NotFound(L.T("Attachment info not found."));
 
         // 细粒度附件访问权限校验
         var denied = CheckAttachmentAccess(att);
@@ -759,7 +831,7 @@ public class CubeController(PageService pageService, TokenService tokenService, 
         if (!att.IsLocalStorage())
         {
             var url = AttachmentProvider.Provider.GetUrl(att.FilePath);
-            if (url.IsNullOrEmpty()) return NotFound("找不到附件文件");
+            if (url.IsNullOrEmpty()) return NotFound(L.T("Attachment file not found."));
             return Redirect(url);
         }
 
@@ -768,14 +840,14 @@ public class CubeController(PageService pageService, TokenService tokenService, 
         if (filePath.IsNullOrEmpty() || !System.IO.File.Exists(filePath))
         {
             var url = att.Source;
-            if (url.IsNullOrEmpty()) return NotFound("找不到附件文件");
+            if (url.IsNullOrEmpty()) return NotFound(L.T("Attachment file not found."));
 
             var rs = await att.Fetch(url);
-            if (!rs) return NotFound("附件远程抓取失败");
+            if (!rs) return NotFound(L.T("Failed to fetch remote attachment."));
 
             filePath = att.GetFilePath();
         }
-        if (filePath.IsNullOrEmpty() || !System.IO.File.Exists(filePath)) return NotFound("附件文件不存在");
+        if (filePath.IsNullOrEmpty() || !System.IO.File.Exists(filePath)) return NotFound(L.T("Attachment file does not exist."));
 
         if (!att.ContentType.IsNullOrEmpty() && !att.ContentType.EqualIgnoreCase("application/octet-stream"))
             return PhysicalFile(filePath, att.ContentType, att.FileName);
@@ -974,7 +1046,7 @@ public class CubeController(PageService pageService, TokenService tokenService, 
             model.DashboardJson = normalized;
         }
         var entity = global::NewLife.Cube.Entity.ViewProfile.SaveGlobalTemplate(typePath, model.ViewsJson, model.FiltersJson, model.DashboardJson);
-        WriteLog("发布模板", true, $"typePath={typePath} 视图/筛选模板已发布");
+        WriteLog("Publish template", true, $"typePath={typePath} the view/filter template has been published");
         return Json(0, null, entity?.ToModel());
     }
 
@@ -995,7 +1067,7 @@ public class CubeController(PageService pageService, TokenService tokenService, 
         if (typePath.IsNullOrEmpty()) return Json(400, "typePath 不能为空");
 
         global::NewLife.Cube.Entity.ViewProfile.DeleteGlobalTemplate(typePath);
-        WriteLog("删除模板", true, $"typePath={typePath} 视图/筛选模板已删除");
+        WriteLog("Delete template", true, $"typePath={typePath} the view/filter template has been deleted");
         return Json(0, "ok");
     }
 

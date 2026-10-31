@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { LoginConfig } from '@newlifex/api-core';
+import type { LoginConfig } from '@newlifex/cube';
 import {
   buildSsoLoginUrl,
   extractMfaToken,
@@ -81,8 +81,8 @@ describe('feature flags', () => {
 });
 
 describe('needSendCodeCaptcha / password / startPage', () => {
-  it('reads login.sendCodeCaptcha', () => {
-    expect(needSendCodeCaptcha({ login: { sendCodeCaptcha: true } })).toBe(true);
+  it('reads login.sendCode', () => {
+    expect(needSendCodeCaptcha({ login: { sendCode: true } })).toBe(true);
     expect(needSendCodeCaptcha({ login: { captcha: true } })).toBe(false);
   });
 

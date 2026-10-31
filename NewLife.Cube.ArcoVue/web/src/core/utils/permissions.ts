@@ -1,5 +1,5 @@
-import { checkAuth, Auth, type AuthCode } from '@newlifex/page-utils';
-import type { PageSetting } from '@newlifex/api-core';
+import { checkAuth, Auth, type AuthCode } from '@newlifex/cube';
+import type { PageSetting } from '@newlifex/cube';
 
 export interface CrudFlags {
   canAdd: boolean;

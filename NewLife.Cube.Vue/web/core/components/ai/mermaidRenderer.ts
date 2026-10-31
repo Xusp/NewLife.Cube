@@ -6,6 +6,8 @@
  * - mermaid.parse 校验 + render 渲染 SVG，失败回退源码展示
  */
 
+import i18n from '../../i18n'
+
 /** 修复 LLM 生成的 `&amp;` HTML 实体，在 Mermaid 代码中还原为 `&` */
 function fixAmpersandEntities(code: string): string {
   return code.replace(/&amp;/g, '&')
@@ -38,7 +40,7 @@ function fixClassApplicationColons(code: string): string {
 
 /** 修复节点标签 [...] 中含有 `|` 的情况（PIPE 解析错误），自动包裹为 ["..."] */
 function fixPipesInNodeLabels(code: string): string {
-  return code.replace(/\[([^\[\]"]*\|[^\[\]"]*)\]/g, (_, content: string) => `["${content}"]`)
+  return code.replace(/\[([^[\]"]*\|[^[\]"]*)\]/g, (_, content: string) => `["${content}"]`)
 }
 
 /** 将节点标签和边标签内的字面量 \n（反斜杠+n）转换为 <br/>，配合 htmlLabels 产生换行 */
@@ -48,7 +50,7 @@ function fixNewlinesInLabels(code: string): string {
     .replace(/\(\(([^()]*)\)\)/g, (_, c: string) => `((${c.replace(/\\n/g, br)}))`)
     .replace(/\(([^()]*)\)/g, (_, c: string) => `(${c.replace(/\\n/g, br)})`)
     .replace(/\["([^"]*)"\]/g, (_, c: string) => `["${c.replace(/\\n/g, br)}"]`)
-    .replace(/\[([^\[\]"]*)\]/g, (_, c: string) => `[${c.replace(/\\n/g, br)}]`)
+    .replace(/\[([^[\]"]*)\]/g, (_, c: string) => `[${c.replace(/\\n/g, br)}]`)
     .replace(/\|([^|]*)\|/g, (_, c: string) => `|${c.replace(/\\n/g, br)}|`)
 }
 
@@ -60,14 +62,14 @@ function fixClassDefInvalidProps(code: string): string {
 /** 修复 LLM 将 <br/> 及追加文本写在节点标签括号之外的问题，收纳回括号内 */
 function fixBrAfterNodeLabel(code: string): string {
   return code.replace(
-    /\[([^\[\]"]+)\](<br\/>)([^:\n\[\]{}|]*)(:::[\w]+)?/g,
+    /\[([^[\]"]+)\](<br\/>)([^:\n[\]{}|]*)(:::[\w]+)?/g,
     (_m, label: string, br: string, extra: string, cls?: string) => `["${label}${br}${extra.trimEnd()}"]${cls ?? ''}`,
   )
 }
 
 /** 修复 LLM 在方括号节点标签内嵌入双引号的问题，替换为单引号 */
 function fixQuotesInBracketLabels(code: string): string {
-  return code.replace(/\[([^"\[\]\n{}<>|][^\[\]\n{}<>]*)\]/g, (m, label: string) =>
+  return code.replace(/\[([^"[\]\n{}<>|][^[\]\n{}<>]*)\]/g, (m, label: string) =>
     label.includes('"') ? `[${label.replace(/"/g, "'")}]` : m,
   )
 }
@@ -221,7 +223,7 @@ export function getMermaid(url: string): Promise<MermaidApi> {
     s.onload = () => {
       try {
         const loaded = (window as unknown as { mermaid?: MermaidApi }).mermaid
-        if (!loaded) throw new Error('mermaid 未暴露全局变量')
+        if (!loaded) throw new Error('mermaid did not expose a global variable')
         if (!_mermaidInit) {
           loaded.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose' })
           _mermaidInit = true
@@ -234,7 +236,7 @@ export function getMermaid(url: string): Promise<MermaidApi> {
     }
     s.onerror = () => {
       _mermaidLoading = null
-      reject(new Error(`mermaid 加载失败: ${src}`))
+      reject(new Error(`mermaid failed to load: ${src}`))
     }
     document.head.appendChild(s)
   })
@@ -279,7 +281,7 @@ function renderMermaidBlock(codeEl: HTMLElement, mermaid: MermaidApi): void {
   const raw = (codeEl.textContent || '').replace(/\n+$/, '')
   const holder = document.createElement('div')
   holder.className = 'ai-mermaid'
-  holder.textContent = '⏳ 图表渲染中...'
+  holder.textContent = i18n.global.t('ai.mermaidRendering')
   pre.parentNode?.replaceChild(holder, pre)
 
   resolveRenderableMermaidCode(mermaid, sanitizeMermaidCode(raw)).then((renderable) => {
@@ -312,7 +314,7 @@ function renderMermaidBlock(codeEl: HTMLElement, mermaid: MermaidApi): void {
         // 源码切换：<details> 展开查看原始 mermaid 源码
         const details = document.createElement('details')
         const summary = document.createElement('summary')
-        summary.textContent = '查看源码'
+        summary.textContent = i18n.global.t('ai.mermaidViewSource')
         details.appendChild(summary)
         const src = document.createElement('pre')
         src.textContent = raw

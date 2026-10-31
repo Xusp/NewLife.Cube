@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime;
@@ -46,7 +46,7 @@ public class IndexController : ControllerBaseX, IPageDataContext
     }
 
     /// <summary>首页</summary>
-    /// <returns></returns>
+    /// <returns>已登录时进入后台，未登录时重定向到登录页</returns>
     //[EntityAuthorize(PermissionFlags.Detail)]
     [AllowAnonymous]
     [HttpGet("/api/[area]/[controller]")]
@@ -70,7 +70,7 @@ public class IndexController : ControllerBaseX, IPageDataContext
     }
 
     /// <summary>服务器信息</summary>
-    /// <returns></returns>
+    /// <returns>服务器信息视图</returns>
     [DisplayName("服务器信息")]
     [EntityAuthorize(PermissionFlags.Detail)]
     [HttpGet]
@@ -114,11 +114,11 @@ public class IndexController : ControllerBaseX, IPageDataContext
             osVersion = mi.OSVersion,
             machineId = mi.UUID,
             machineProduct = mi.Product,
-            cpu = mi.Processor + Environment.ProcessorCount + "核心 使用率" + mi.CpuRate.ToString("p0") + mi.Temperature + " ℃",
+            cpu = mi.Processor + " " + Environment.ProcessorCount + L.T(" cores, usage ") + mi.CpuRate.ToString("p0") + mi.Temperature + " ℃",
             openTime = TimeSpan.FromMilliseconds(Environment.TickCount64).ToString(@"dd\.hh\:mm\:ss"),
             serverTime = DateTime.Now,
-            memory = "物理：" + (mi.AvailableMemory / 1024 / 1024).ToString("n0") + "M/" + (mi.Memory / 1024 / 1024).ToString("n0") + "M    工作/提交: " + (process.WorkingSet64 / 1024 / 1024).ToString("n0") + "M/@" + (process.PrivateMemorySize64 / 1024 / 1024).ToString("n0") + "M   GC: " + (GC.GetTotalMemory(false) / 1024 / 1024).ToString("n0") + "M",
-            processTime = process.TotalProcessorTime.TotalSeconds.ToString("N2") + "秒 启动于" + process.StartTime.ToLocalTime().ToFullString(),
+            memory = L.T("Physical: ") + (mi.AvailableMemory / 1024 / 1024).ToString("n0") + "M/" + (mi.Memory / 1024 / 1024).ToString("n0") + "M" + L.T("    Working/Committed: ") + (process.WorkingSet64 / 1024 / 1024).ToString("n0") + "M/@" + (process.PrivateMemorySize64 / 1024 / 1024).ToString("n0") + "M   GC: " + (GC.GetTotalMemory(false) / 1024 / 1024).ToString("n0") + "M",
+            processTime = process.TotalProcessorTime.TotalSeconds.ToString("N2") + L.T("s since ") + process.StartTime.ToLocalTime().ToFullString(),
             gc = gc,
             //startTime = ApplicationManager.Load().StartTime.ToLocalTime().ToFullString()
         };
@@ -185,7 +185,7 @@ public class IndexController : ControllerBaseX, IPageDataContext
             var value = d?.GetType().GetProperty("Value")?.GetValue(d) ?? "";
             var trend = d?.GetType().GetProperty("Trend")?.GetValue(d) ?? "";
             var url = d?.GetType().GetProperty("Url")?.GetValue(d) ?? "";
-            var item = new { name = info.Name, label = info.Title, value, trend, color = info.Color ?? "blue", url };
+            var item = new { name = info.Name, label = L.T(info.Title), value, trend, color = info.Color ?? "blue", url };
             if (layout.TryGetValue(info.Name, out var itemLayout) && itemLayout.Hide) hiddenKpis.Add(item);
             else kpis.Add(item);
         }
@@ -201,7 +201,7 @@ public class IndexController : ControllerBaseX, IPageDataContext
                 if (menu == null || !menu.Visible || menu.Url.IsNullOrEmpty() || menu.Url.StartsWith("~/")) continue;
                 if (!urls.Add(menu.Url)) continue;
 
-                links.Add(new { Name = menu.DisplayName ?? menu.Name, Url = menu.Url, Icon = menu.Icon });
+                links.Add(new { Name = NewLife.Cube.Membership.MenuHelper.GetDisplayName(menu), Url = menu.Url, Icon = menu.Icon });
             }
         }
         if (links.Count < 8)
@@ -211,7 +211,7 @@ public class IndexController : ControllerBaseX, IPageDataContext
                 if (links.Count >= 8) break;
                 if (!urls.Add(menu.Url)) continue;
 
-                links.Add(new { Name = menu.DisplayName ?? menu.Name, Url = menu.Url, Icon = menu.Icon });
+                links.Add(new { Name = NewLife.Cube.Membership.MenuHelper.GetDisplayName(menu), Url = menu.Url, Icon = menu.Icon });
             }
         }
 
@@ -232,12 +232,12 @@ public class IndexController : ControllerBaseX, IPageDataContext
         // 系统信息
         var sysInfo = new Dictionary<String, Object>
         {
-            ["操作系统"] = $"{mi.OSName} {mi.OSVersion}",
-            ["机器"] = $"{Environment.MachineName} / {Environment.UserName}",
-            ["处理器"] = $"{mi.Processor}，{Environment.ProcessorCount} 核心",
-            ["运行时"] = Assembly.GetExecutingAssembly().GetCustomAttribute<TargetFrameworkAttribute>()?.FrameworkDisplayName,
-            ["应用"] = $"{process.ProcessName}，程序集 {AssemblyX.GetAssemblies(null).Count()} 个",
-            ["启动时间"] = DateTime.Now.AddMilliseconds(-Environment.TickCount64).ToFullString(),
+            [L.T("OS")] = $"{mi.OSName} {mi.OSVersion}",
+            [L.T("Machine")] = $"{Environment.MachineName} / {Environment.UserName}",
+            [L.T("Processor")] = $"{mi.Processor}, {Environment.ProcessorCount} cores",
+            [L.T("Runtime")] = Assembly.GetExecutingAssembly().GetCustomAttribute<TargetFrameworkAttribute>()?.FrameworkDisplayName,
+            [L.T("Application")] = $"{process.ProcessName}, {AssemblyX.GetAssemblies(null).Count()} assemblies",
+            [L.T("Start time")] = DateTime.Now.AddMilliseconds(-Environment.TickCount64).ToFullString(),
         };
 
         // 内容部件（KPI 以外）：可见/隐藏分开返回，排序对齐 MVC WidgetManager.GetWidgets（组配置 + 用户布局）。
@@ -245,10 +245,10 @@ public class IndexController : ControllerBaseX, IPageDataContext
         Object BuildWidgetItem(WidgetAttribute info) => new
         {
             name = info.Name,
-            title = info.Title,
+            title = L.T(info.Title),
             icon = info.Icon,
             cols = info.Cols,
-            category = info.Category,
+            category = L.T(info.Category),
             widgetType = info.WidgetType.ToString(),
             data = info.WidgetType == WidgetTypes.Chart ? null : wm.GetData(info),
         };
@@ -295,22 +295,22 @@ public class IndexController : ControllerBaseX, IPageDataContext
 
     /// <summary>保存当前用户工作台卡片布局（排序+隐藏），合并为单行 Parameter 原子保存</summary>
     /// <param name="layout">卡片名到布局项的字典（{name: {sort, hide}}）</param>
-    /// <returns></returns>
+    /// <returns>保存结果 JSON</returns>
     [DisplayName("保存工作台布局")]
     [EntityAuthorize]
     [HttpPost]
     public ActionResult SaveWidgetLayout(IDictionary<String, WidgetLayout> layout)
     {
         var userId = ManageProvider.User?.ID ?? 0;
-        if (userId <= 0) return Json(401, null, "未登录");
-        if (layout == null || layout.Count == 0) return Json(1, null, "布局为空");
+        if (userId <= 0) return Json(401, null, L.T("Please sign in first."));
+        if (layout == null || layout.Count == 0) return Json(1, null, L.T("The layout is empty."));
 
         _widgetManager.SaveLayout(userId, layout);
         return Json(0, null, "ok");
     }
 
     /// <summary>重置当前用户工作台卡片布局为默认（删除布局 Parameter 行）</summary>
-    /// <returns></returns>
+    /// <returns>重置结果 JSON</returns>
     [DisplayName("重置工作台布局")]
     [EntityAuthorize]
     [HttpPost]
@@ -325,14 +325,14 @@ public class IndexController : ControllerBaseX, IPageDataContext
 
     #region AI 诊断
     /// <summary>AI 系统诊断。根据服务器运行指标生成健康诊断报告（SSE 流式输出）</summary>
-    /// <returns></returns>
+    /// <returns>SSE 流式响应，逐段输出诊断报告</returns>
     [DisplayName("AI 系统诊断")]
     [EntityAuthorize(PermissionFlags.Detail)]
     [HttpGet]
     public async Task<ActionResult> AiDiagnose()
     {
         var set = CubeSetting.Current;
-        if (!set.AISwitch) return Json(500, null, "AI 未启用，请在系统设置中开启");
+        if (!set.AISwitch) return Json(500, null, L.T("AI is not enabled. Please enable it in system settings."));
 
         var mi = MachineInfo.Current ?? new MachineInfo();
         var process = Process.GetCurrentProcess();
@@ -384,7 +384,7 @@ public class IndexController : ControllerBaseX, IPageDataContext
     #endregion
 
     /// <summary>服务器变量列表</summary>
-    /// <returns></returns>
+    /// <returns>服务器变量与当前请求信息 JSON</returns>
     [DisplayName("服务器变量列表")]
     [EntityAuthorize(PermissionFlags.Detail)]
     [HttpGet]
@@ -417,11 +417,11 @@ public class IndexController : ControllerBaseX, IPageDataContext
     }
     /// <summary>进程模块列表</summary>
     /// <param name="model">All全部,OnlyUser用户</param>
-    /// <returns></returns>
+    /// <returns>进程模块 JSON</returns>
     [DisplayName("进程模块列表")]
     [EntityAuthorize(PermissionFlags.Detail)]
     [HttpGet]
-    public ActionResult ProcessList(String model)
+    public ActionResult ProcessList(String? model)
     {
         var isAll = String.Equals("All", model, StringComparison.OrdinalIgnoreCase);
         var process = Process.GetCurrentProcess();
@@ -450,12 +450,12 @@ public class IndexController : ControllerBaseX, IPageDataContext
     }
 
     /// <summary>程序集列表</summary>
-    /// <param name="model"></param>
-    /// <returns></returns>
+    /// <param name="model">All 全部模块，OnlyUser 仅用户模块</param>
+    /// <returns>程序集列表 JSON</returns>
     [DisplayName("程序集列表")]
     [EntityAuthorize(PermissionFlags.Detail)]
     [HttpGet]
-    public ActionResult AssemblyList(String model)
+    public ActionResult AssemblyList(String? model)
     {
         var isAll = String.Equals("All", model, StringComparison.OrdinalIgnoreCase);
         var result = new List<dynamic>();
@@ -480,7 +480,7 @@ public class IndexController : ControllerBaseX, IPageDataContext
     }
 
     /// <summary>重启</summary>
-    /// <returns></returns>
+    /// <returns>重启结果 JSON</returns>
     [DisplayName("重启")]
     [EntityAuthorize((PermissionFlags)16)]
     [HttpPost]
@@ -505,7 +505,7 @@ public class IndexController : ControllerBaseX, IPageDataContext
     /// <summary>
     /// 释放内存，参考之前的Runtime方法
     /// </summary>
-    /// <returns></returns>
+    /// <returns>释放内存结果 JSON</returns>
     [DisplayName("释放内存")]
     [EntityAuthorize((PermissionFlags)16)]
     [HttpGet]
@@ -533,15 +533,15 @@ public class IndexController : ControllerBaseX, IPageDataContext
     /// <summary>
     /// 获取菜单树
     /// </summary>
-    /// <returns></returns>
+    /// <returns>菜单树 JSON</returns>
     [EntityAuthorize]
     [HttpGet]
-    public ActionResult GetMenuTree(String module) => Json(0, null, GetMenu(module));
+    public ActionResult GetMenuTree(String? module) => Json(0, null, GetMenu(module));
 
     private IList<MenuTree> GetMenu(String module)
     {
         var fact = ManageProvider.Menu;
-        var menus = fact.Root.Childs;
+        var menus = NewLife.Cube.Membership.MenuHelper.FilterAvailable(fact.Root.Childs);
 
         // 根据模块过滤菜单
         if (module.EqualIgnoreCase("base"))
@@ -563,6 +563,9 @@ public class IndexController : ControllerBaseX, IPageDataContext
         }
         // module 为空时不做过滤，直接返回全部根级菜单
 
+        // 跨宿主共享菜单数据时，过滤本站点未部署控制器的菜单
+        menus = NewLife.Cube.Membership.MenuHelper.FilterAvailable(menus);
+
         // 如果顶级只有一层，并且至少有三级目录，则提升一级
         if (menus.Count == 1 && menus[0].Childs.All(m => m.Childs.Count > 0)) { menus = menus[0].Childs; }
 
@@ -571,8 +574,8 @@ public class IndexController : ControllerBaseX, IPageDataContext
             // 左侧菜单展示所有可见菜单，不按角色权限过滤
             // 权限控制在 Controller/Action 层通过 EntityAuthorizeAttribute 实现
             var parent = fact.FindByID(pMenuTree.ID);
-            var subMenus = parent?.Childs?.Where(m => m.Visible).ToList() as IList<IMenu> ?? [];
-            return subMenus;
+            var subMenus = parent?.Childs?.Where(m => m.Visible).ToList() as IList<IMenu>;
+            return NewLife.Cube.Membership.MenuHelper.FilterAvailable(subMenus);
         }, list =>
         {
             if (list == null || list.Count == 0) return null;
@@ -581,14 +584,14 @@ public class IndexController : ControllerBaseX, IPageDataContext
                             {
                                 ID = menu.ID,
                                 Name = menu.Name,
-                                DisplayName = menu.DisplayName ?? menu.Name,
+                                DisplayName = NewLife.Cube.Membership.MenuHelper.GetDisplayName(menu),
                                 FullName = menu.FullName,
                                 Url = menu.Url,
                                 Icon = menu.Icon,
                                 Visible = menu.Visible,
                                 NewWindow = menu.NewWindow,
                                 ParentID = menu.ParentID,
-                                Permissions = menu.Permissions
+                                Permissions = NewLife.Cube.Membership.MenuHelper.GetPermissions(menu)
                             }).ToList();
             return menuList.Count > 0 ? menuList : null;
         }, menus);

@@ -4,7 +4,7 @@ vi.mock('@/api', () => ({
   default: { workflow: {}, automation: { entities: vi.fn() }, page: { getPage: vi.fn() } },
 }));
 
-import type { WorkflowInstanceDetail } from '@newlifex/api-core';
+import type { WorkflowInstanceDetail } from '@newlifex/cube';
 import { buildProgressFlow, definitionPaint, opinionTimeline, previewKind, rollbackTargets, executionOrder, splitAttachments } from './wfProgressFlow';
 
 const snapshot = JSON.stringify({

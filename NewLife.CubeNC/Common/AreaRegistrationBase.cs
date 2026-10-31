@@ -32,7 +32,7 @@ public class AreaBase : AreaAttribute
 
         var ns = areaType.Namespace + ".Controllers";
         var areaName = areaType.Name.TrimSuffix("Area");
-        XTrace.WriteLine("开始注册权限管理区域[{0}]，控制器命名空间[{1}]", areaName, ns);
+        XTrace.WriteLine(L.TLog("Start registering admin area [{0}], controller namespace [{1}]", areaName, ns));
 
         // 更新区域名集合
         var rs = CubeService.AreaNames?.ToList() ?? [];
@@ -74,17 +74,16 @@ public class AreaBase : AreaAttribute
 
         var menus = MenuHelper.ScanController(mf, areaName, areaType);
 
-        // 更新区域名称为友好中文名
+        // 区域根菜单：显示名为空时才写入区域显示名，已有值保持不动
         var menu = mf.Root.FindByPath(areaName);
-        if (menu != null && menu.DisplayName.IsNullOrEmpty())
+        if (menu != null)
         {
-            var dis = areaType.GetDisplayName();
             var des = areaType.GetDescription();
+            var changed = MenuHelper.FillDisplayName(menu, areaType.GetDisplayName() ?? areaName);
 
-            if (!dis.IsNullOrEmpty()) menu.DisplayName = dis;
-            if (!des.IsNullOrEmpty()) menu.Remark = des;
+            if (menu.Remark.IsNullOrEmpty() && !des.IsNullOrEmpty()) { menu.Remark = des; changed = true; }
 
-            (menu as IEntity).Update();
+            if (changed) (menu as IEntity).Update();
         }
 
         // 再次检查菜单权限，因为上面的ScanController里开启菜单权限检查时，菜单可能还没有生成

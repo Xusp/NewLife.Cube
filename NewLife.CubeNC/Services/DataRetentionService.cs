@@ -11,8 +11,8 @@ namespace NewLife.Cube.Services;
 
 /// <summary>数据保留服务</summary>
 /// <remarks>实例化数据保留服务</remarks>
-/// <param name="setting"></param>
-/// <param name="tracer"></param>
+/// <param name="setting">魔方配置，提供数据保留天数等参数</param>
+/// <param name="tracer">链路追踪器</param>
 public class DataRetentionService(CubeSetting setting, ITracer tracer) : IHostedService
 {
     private TimerX _timer;
@@ -20,8 +20,8 @@ public class DataRetentionService(CubeSetting setting, ITracer tracer) : IHosted
     /// <summary>
     /// 开始
     /// </summary>
-    /// <param name="cancellationToken"></param>
-    /// <returns></returns>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>启动定时器后立即完成的异步任务</returns>
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _timer = new TimerX(DoWork, null, DateTime.Today.AddMinutes(Rand.Next(60)), 3600 * 1000) { Async = true };
@@ -35,8 +35,8 @@ public class DataRetentionService(CubeSetting setting, ITracer tracer) : IHosted
     /// <summary>
     /// 停止
     /// </summary>
-    /// <param name="cancellationToken"></param>
-    /// <returns></returns>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>释放定时器后完成的异步任务</returns>
     public Task StopAsync(CancellationToken cancellationToken)
     {
         _timer.TryDispose();
@@ -62,13 +62,13 @@ public class DataRetentionService(CubeSetting setting, ITracer tracer) : IHosted
         try
         {
             var rs = OAuthLog.DeleteBefore(time, 10000);
-            XTrace.WriteLine("删除[{0}]之前的 OAuthLog 共：{1:n0}", time.ToFullString(), rs);
+            XTrace.WriteLine(L.TLog("Deleted OAuthLog rows before [{0}]: {1:n0}", time.ToFullString(), rs));
 
             rs = AppLog.DeleteBefore(time);
-            XTrace.WriteLine("删除[{0}]之前的 AppLog 共：{1:n0}", time.ToFullString(), rs);
+            XTrace.WriteLine(L.TLog("Deleted AppLog rows before [{0}]: {1:n0}", time.ToFullString(), rs));
 
             rs = DeleteLogBefore(time);
-            XTrace.WriteLine("删除[{0}]之前的 Log 共：{1:n0}", time.ToFullString(), rs);
+            XTrace.WriteLine(L.TLog("Deleted Log rows before [{0}]: {1:n0}", time.ToFullString(), rs));
         }
         catch (Exception ex)
         {

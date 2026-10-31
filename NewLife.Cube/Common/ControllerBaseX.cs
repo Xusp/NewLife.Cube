@@ -9,6 +9,7 @@ using NewLife.Cube.Extensions;
 using NewLife.Log;
 using NewLife.Model;
 using NewLife.Remoting;
+using NewLife.Security;
 using NewLife.Serialization;
 using XCode.Membership;
 using IActionFilter = Microsoft.AspNetCore.Mvc.Filters.IActionFilter;
@@ -23,6 +24,8 @@ public class ControllerBaseX : ControllerBase, IActionFilter
 {
 
     #region 属性
+    /// <summary>统一响应业务码在 HttpContext.Items 中的键，供结果过滤器读取本次响应是否成功</summary>
+    public const String ResponseCodeKey = "Cube_ResponseCode";
     /// <summary>临时会话扩展信息。仅限本地内存，不支持分布式共享</summary>
     public IDictionary<String, Object> Session { get; private set; }
 
@@ -105,14 +108,14 @@ public class ControllerBaseX : ControllerBase, IActionFilter
                         && !ManagerProviderHelper.IsShareRequestAllowed(HttpContext, shareUt))
                     {
                         CurrentUser = null;
-                        throw new ApiException(403, "分享令牌无权访问该接口");
+                        throw new ApiException(403, "The share token is not allowed to access this endpoint");
                     }
                 }
 
                 // 认证层租户校验（fail-closed）：多租户开启时，已认证用户必须处于有效租户上下文，否则拒绝访问
                 if (CurrentUser != null && !HttpContext.ValidateTenant(CurrentUser))
                 {
-                    throw new ApiException(403, "无权限访问当前租户");
+                    throw new ApiException(403, L.T("No permission to access the current tenant."));
                 }
 
                 if (CurrentUser != null)
@@ -121,7 +124,7 @@ public class ControllerBaseX : ControllerBase, IActionFilter
 
             if (CurrentUser == null && context.ActionDescriptor is ControllerActionDescriptor act && !act.MethodInfo.IsDefined(typeof(AllowAnonymousAttribute)))
             {
-                throw new ApiException(403, "认证失败");
+                throw new ApiException(403, L.T("Authentication failed."));
             }
 
             if (CurrentUser != null)
@@ -129,11 +132,8 @@ public class ControllerBaseX : ControllerBase, IActionFilter
                 // 设置变量，数据权限使用
                 HttpContext.Items["userId"] = CurrentUser.ID;
 
-                // 批量操作需要更新或删除权限，无权限时隐藏选择列与批量按钮；没有菜单时不做权限控制
-                if (Menu != null && CurrentUser is IUser user2)
-                {
-                    PageSetting.EnableSelect = user2.Has(Menu, PermissionFlags.Update, PermissionFlags.Delete);
-                }
+                // 选择列是否出现由页面能力决定；批量修改/删除的用户权限由前端结合用户信息计算
+                // PageSetting.EnableSelect 不在这里按权限改写，避免权限变化后被 /meta 缓存成旧值
             }
         }
         catch (Exception ex)
@@ -161,6 +161,13 @@ public class ControllerBaseX : ControllerBase, IActionFilter
 
         var traceId = DefaultSpan.Current?.TraceId;
 
+        // 304 条件请求：动作已写入状态码，直接返回空结果，避免被包装成 200 JSON
+        if (HttpContext.Response.StatusCode == 304 && !HttpContext.Response.HasStarted)
+        {
+            context.Result = new StatusCodeResult(304);
+            return;
+        }
+
         if (context.Result != null)
         {
             if (context.Result is ObjectResult obj)
@@ -171,33 +178,45 @@ public class ControllerBaseX : ControllerBase, IActionFilter
                     {
                         Content = OnJsonSerialize(response),
                         ContentType = "application/json",
-                        StatusCode = 200
+                        StatusCode = GetHttpStatusCode(response.Code)
                     };
                 }
                 else
                 {
-                    var rs = new { code = obj.StatusCode ?? 0, data = obj.Value, traceId };
+                    // 与 Json() 统一响应包保持同一字段集：code/message/data/traceId
+                    var code = obj.StatusCode ?? 0;
+                    var rs = new { code, message = (String)null, data = obj.Value, traceId };
                     context.Result = new ContentResult
                     {
                         Content = OnJsonSerialize(rs),
                         ContentType = "application/json",
-                        StatusCode = 200
+                        StatusCode = GetHttpStatusCode(code),
                     };
                 }
             }
             else if (context.Result is EmptyResult && !HttpContext.Response.HasStarted)
             {
                 // SSE 等流式响应已开始（Headers 只读）后不能再转 JsonResult，保持原样以完整结束流
-                context.Result = new JsonResult(new { code = 0, data = new { }, traceId });
+                context.Result = new JsonResult(new { code = 0, message = (String)null, data = new { }, traceId });
             }
         }
         else if (context.Exception != null && !context.ExceptionHandled && !HttpContext.Response.HasStarted)
         {
-            //var ex = context.Exception.GetTrue();
+            // 与实体控制器 BuildFailResponse 保持同一套映射：ApiException 用自身码，其余异常统一 500
+            var code = ApiCode.InternalServerError.ToInt();
+            var message = NewLife.Common.SysConfig.Current.Develop ? ex.Message : L.T("The server is busy. Please try again later.");
             if (ex is ApiException aex)
-                context.Result = new JsonResult(new { code = aex.Code, message = aex.Message, traceId });
-            else
-                context.Result = new JsonResult(new { code = 500, message = ex.Message, traceId });
+            {
+                code = aex.Code;
+                message = aex.Message;
+            }
+            else if (ex is XException)
+            {
+                // XException 视为已知业务异常，消息对用户可读，生产环境也保留
+                message = ex.Message;
+            }
+
+            context.Result = new JsonResult(new { code, message, traceId }) { StatusCode = GetHttpStatusCode(code) };
 
             context.ExceptionHandled = true;
 
@@ -232,7 +251,7 @@ public class ControllerBaseX : ControllerBase, IActionFilter
             data = null;
         }
 
-        Object rs = new { code, message, data };
+        Object rs = new { code, message, data, traceId = DefaultSpan.Current?.TraceId };
         if (extend != null)
         {
             var dic = rs.ToDictionary();
@@ -243,7 +262,34 @@ public class ControllerBaseX : ControllerBase, IActionFilter
         var json = OnJsonSerialize(rs);
         DefaultSpan.Current?.AppendTag(json);
 
-        return Content(json, "application/json", Encoding.UTF8);
+        // 供结果过滤器（如幂等）判断本次响应是否成功，避免把失败结果缓存为重放结果
+        // HttpContext 为空表示单元测试直调控制器，此时无过滤器链路，跳过即可
+        if (HttpContext != null) HttpContext.Items[ResponseCodeKey] = code;
+
+        return new ContentResult
+        {
+            Content = json,
+            ContentType = "application/json; charset=utf-8",
+            StatusCode = GetHttpStatusCode(code),
+        };
+    }
+
+    /// <summary>由业务码取得协议层 HTTP 状态码</summary>
+    /// <remarks>
+    /// 仅在开启 <see cref="CubeSetting.EnableHttpStatusCodes"/> 时生效，用于让网关/监控识别 401/403/404/409/422/429/500；
+    /// 其余业务码（0 与负数）保持 200，业务判错仍以响应体 code 为准。
+    /// </remarks>
+    /// <param name="code">业务返回码</param>
+    /// <returns>HTTP 状态码，200 表示不改变</returns>
+    protected static Int32 GetHttpStatusCode(Int32 code)
+    {
+        if (!CubeSetting.Current.EnableHttpStatusCodes) return 200;
+
+        return code switch
+        {
+            401 or 403 or 404 or 409 or 422 or 429 or 500 => code,
+            _ => 200,
+        };
     }
 
     /// <summary>Json序列化。默认使用FastJson</summary>
@@ -262,6 +308,49 @@ public class ControllerBaseX : ControllerBase, IActionFilter
             FullTime = false// yyyy-MM-dd HH:mm:ss
         });
         return json;
+    }
+
+    /// <summary>校验条件请求。数据哈希与 If-None-Match 匹配时写入 304 并返回 true</summary>
+    /// <param name="data">响应数据（不含信封与 TraceId）</param>
+    /// <returns>是否命中缓存，调用方应返回 null</returns>
+    protected virtual Boolean CheckNotModified(Object data)
+    {
+        if (data == null) return false;
+
+        String json;
+        try
+        {
+            json = data.ToJson();
+        }
+        catch
+        {
+            // 序列化失败时放弃 ETag，不影响正常响应
+            return false;
+        }
+
+        var etag = "\"" + json.MD5() + "\"";
+        Response.Headers["ETag"] = etag;
+        Response.Headers["Cache-Control"] = "private, no-cache";
+        // meta 含用户列偏好、权限标志与租户上下文；条件缓存必须按这些维度区分
+        Response.Headers["Vary"] = "Accept-Language, Authorization, Cookie, X-Tenant, X-App-Id";
+
+        var inm = Request.Headers.IfNoneMatch;
+        foreach (var item in inm)
+        {
+            if (item.IsNullOrEmpty()) continue;
+
+            foreach (var part in item.Split(','))
+            {
+                var tag = part.Trim();
+                if (tag == "*" || tag == etag || tag == "W/" + etag)
+                {
+                    Response.StatusCode = 304;
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
     #endregion
 

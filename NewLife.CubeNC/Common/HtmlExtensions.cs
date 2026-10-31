@@ -24,7 +24,7 @@ public static class HtmlExtensions
     public static IHtmlContent ForEditor(this IHtmlHelper Html, String name, Object value, Type type = null, String format = null, Object htmlAttributes = null)
     {
         if (type == null && value != null) type = value.GetType();
-        if (type == null) throw new XException("设计错误！ForEditor({0}, null, null)不能值和类型同时为空，否则会导致死循环", name);
+        if (type == null) throw new XException("Design error! ForEditor({0}, null, null) cannot have both value and type null, otherwise it loops forever", name);
 
         switch (Type.GetTypeCode(type))
         {
@@ -414,7 +414,7 @@ public static class HtmlExtensions
     /// <returns></returns>
     public static IHtmlContent ForEnum(this IHtmlHelper Html, String name, Object value, String label = null)
     {
-        var dic = EnumHelper.GetDescriptions(value.GetType());
+        var dic = EnumLocalization.GetDescriptions(value.GetType());
         var data = new SelectList(dic, "Key", "Value", value.ToInt());
         // 由于 Html.DropDownList 获取默认值，会从 ViewData，ViewData.Model，中获取name的值
         // 如果获取到了，则不会再看传入的selectlist的默认值，由于此处是枚举，所以通过 Html.ViewData.Eval(name) 会得到字符串值，所以导致绑定默认值失败
@@ -442,7 +442,7 @@ public static class HtmlExtensions
     /// <returns></returns>
     public static IHtmlContent ForEnum<T>(this IHtmlHelper Html, String name, String selectedValues)
     {
-        var dic = EnumHelper.GetDescriptions(typeof(T));
+        var dic = EnumLocalization.GetDescriptions(typeof(T));
 
         return Html.ForListBox(name, dic, selectedValues);
     }

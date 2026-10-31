@@ -1,8 +1,9 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.IO.Compression;
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using NewLife.Collections;
+using NewLife.Cube.Attributes;
 using NewLife.Cube.Entity;
 using NewLife.Cube.Models;
 using NewLife.Cube.ViewModels;
@@ -40,7 +41,7 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
     private String ProcessDelete(TEntity entity)
     {
         // 假删除与恢复。首次删除标记假删除，假删除后再删除则是真正删除
-        var act = "删除";
+        var act = L.T("Delete");
         var fi = GetDeleteField();
         if (fi != null)
         {
@@ -51,7 +52,7 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
                 entity.SetItem(fi.Name, true);
 
                 if (!Valid(entity, DataObjectMethodType.Update, true))
-                    throw new Exception("验证失败");
+                    throw new Exception(L.T("Validation failed."));
 
                 OnUpdate(entity);
             }
@@ -59,10 +60,10 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
             else if (restore || !PageSetting.DoubleDelete)
             {
                 entity.SetItem(fi.Name, !restore);
-                if (restore) act = "恢复";
+                if (restore) act = L.T("Restore");
 
                 if (!Valid(entity, DataObjectMethodType.Update, true))
-                    throw new Exception("验证失败");
+                    throw new Exception(L.T("Validation failed."));
 
                 OnUpdate(entity);
             }
@@ -70,7 +71,7 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
             else
             {
                 if (!Valid(entity, DataObjectMethodType.Delete, true))
-                    throw new Exception("验证失败");
+                    throw new Exception(L.T("Validation failed."));
 
                 OnDelete(entity);
             }
@@ -78,7 +79,7 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
         else
         {
             if (!Valid(entity, DataObjectMethodType.Delete, true))
-                throw new Exception("验证失败");
+                throw new Exception(L.T("Validation failed."));
 
             OnDelete(entity);
         }
@@ -100,10 +101,83 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
             .Where(e => e > 0)
             .ToArray();
 
-    /// <summary>批量启用或禁用</summary>
+    /// <summary>批量启用（GET 兼容入口）。前端 SPA 以 keys 传主键，返回实体响应体</summary>
+    /// <remarks>
+    /// 与 POST <c>enableSelect</c> 并存：POST 为规范入口（返回 ApiResponse&lt;Int32&gt;），
+    /// GET 保留给既有 SPA 皮肤（ArcoVue 等）与历史客户端；两者共用 <c>EnableOrDisableSelect</c>。
+    /// </remarks>
+    /// <param name="keys">主键集合，逗号分隔</param>
+    /// <param name="reason">操作原因</param>
+    /// <returns></returns>
+    [EntityAuthorize(PermissionFlags.Update)]
+    [DisplayName("Batch enable")]
+    [HttpGet("/api/[area]/[controller]/EnableSelect")]
+    public virtual ApiResponse<TEntity> EnableSelectGet(String keys, String reason = null) => SetEnableSelectEntity(true, reason);
+
+    /// <summary>批量禁用（GET 兼容入口）。前端 SPA 以 keys 传主键，返回实体响应体</summary>
+    /// <param name="keys">主键集合，逗号分隔</param>
+    /// <param name="reason">操作原因</param>
+    /// <returns></returns>
+    [EntityAuthorize(PermissionFlags.Update)]
+    [DisplayName("Batch disable")]
+    [HttpGet("/api/[area]/[controller]/DisableSelect")]
+    public virtual ApiResponse<TEntity> DisableSelectGet(String keys, String reason = null) => SetEnableSelectEntity(false, reason);
+
+    /// <summary>批量启用。主键集合放在请求的 keys 参数（查询串、表单或 JSON 体均可）</summary>
+    /// <param name="reason">操作原因，写入操作日志</param>
+    /// <returns>实际改动的行数</returns>
+    /// <remarks>对齐 MVC 的 EnableSelect 动作：实体必须含 Boolean 类型 Enable 字段，权限要求为修改。</remarks>
+    [EntityAuthorize(PermissionFlags.Update)]
+    [DisplayName("Batch enable")]
+    [HttpPost("/api/[area]/[controller]/enableSelect")]
+    public virtual ApiResponse<Int32> EnableSelect(String reason = null) => SetEnableSelect(true, reason);
+
+    /// <summary>批量禁用。主键集合放在请求的 keys 参数（查询串、表单或 JSON 体均可）</summary>
+    /// <param name="reason">操作原因，写入操作日志</param>
+    /// <returns>实际改动的行数</returns>
+    /// <remarks>对齐 MVC 的 DisableSelect 动作：实体必须含 Boolean 类型 Enable 字段，权限要求为修改。</remarks>
+    [EntityAuthorize(PermissionFlags.Update)]
+    [DisplayName("Batch disable")]
+    [HttpPost("/api/[area]/[controller]/disableSelect")]
+    public virtual ApiResponse<Int32> DisableSelect(String reason = null) => SetEnableSelect(false, reason);
+
+    private ApiResponse<TEntity> SetEnableSelectEntity(Boolean isEnable, String reason)
+    {
+        var act = L.T(isEnable ? "Batch enable" : "Batch disable");
+        try
+        {
+            var count = EnableOrDisableSelect(isEnable, reason);
+
+            return new ApiResponse<TEntity> { Code = 0, Message = L.T("{0} succeeded! Total {1} rows", act, count) };
+        }
+        catch (Exception ex)
+        {
+            var fail = BuildFailResponse(ex, act, null);
+            return new ApiResponse<TEntity> { Code = fail.Code, Message = fail.Message, FieldErrors = fail.FieldErrors };
+        }
+    }
+
+    private ApiResponse<Int32> SetEnableSelect(Boolean isEnable, String reason)    {
+        var act = L.T(isEnable ? "Batch enable" : "Batch disable");
+        try
+        {
+            var count = EnableOrDisableSelect(isEnable, reason);
+
+            return new ApiResponse<Int32> { Code = 0, Message = L.T("{0} succeeded! Total {1} rows", act, count), Data = count };
+        }
+        catch (Exception ex)
+        {
+            var fail = BuildFailResponse(ex, act, null);
+            return new ApiResponse<Int32> { Code = fail.Code, Message = fail.Message, FieldErrors = fail.FieldErrors };
+        }
+    }
+
+    /// <summary>
+    /// 批量启用或禁用
+    /// </summary>
     /// <param name="isEnable">启用/禁用</param>
     /// <param name="reason">操作原因</param>
-    /// <returns>更新条数</returns>
+    /// <returns>成功更新的行数</returns>
     protected virtual Int32 EnableOrDisableSelect(Boolean isEnable, String reason)
     {
         var count = 0;
@@ -136,7 +210,7 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
     /// <param name="entity">实体对象</param>
     /// <param name="fieldName">字段名</param>
     /// <param name="value">数值</param>
-    /// <returns></returns>
+    /// <returns>字段值已变更并保存时返回 true</returns>
     protected virtual Boolean OnSetField(TEntity entity, String fieldName, Boolean value)
     {
         if (entity == null || entity[fieldName].ToBoolean() == value) return false;
@@ -151,13 +225,13 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
 
     #region 实体操作重载
     /// <summary>添加实体对象</summary>
-    /// <param name="entity"></param>
-    /// <returns></returns>
+    /// <param name="entity">待插入的实体</param>
+    /// <returns>受影响行数</returns>
     protected virtual Int32 OnInsert(TEntity entity) => entity.Insert();
 
     /// <summary>更新实体对象</summary>
-    /// <param name="entity"></param>
-    /// <returns></returns>
+    /// <param name="entity">待更新的实体</param>
+    /// <returns>受影响行数</returns>
     protected virtual Int32 OnUpdate(TEntity entity)
     {
         if (Request.HasFormContentType)
@@ -188,8 +262,8 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
     }
 
     /// <summary>删除实体对象</summary>
-    /// <param name="entity"></param>
-    /// <returns></returns>
+    /// <param name="entity">待删除的实体</param>
+    /// <returns>受影响行数</returns>
     protected virtual Int32 OnDelete(TEntity entity) => entity.Delete();
     #endregion
 
@@ -222,7 +296,7 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
     /// <param name="factory">实体工厂</param>
     /// <param name="list">新数据列表</param>
     /// <param name="context">导入上下文（含表头与字段）</param>
-    /// <returns></returns>
+    /// <returns>成功导入的行数</returns>
     protected virtual Int32 OnImport(IEntityFactory factory, IList<IEntity> list, ImportContext context)
     {
         if (list.Count == 0) return 0;
@@ -326,20 +400,20 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
 
             // ① 归属不得为他人。与 ValidPermission 对新增的判定一致（归属为 0 视为未声明）
             if (CubeDataScope.IsForgedOwner(entity, ctx))
-                throw new NoPermissionException(PermissionFlags.Insert, $"导入数据越权：{keyField?.Name}={key} 归属为他人");
+                throw new NoPermissionException(PermissionFlags.Insert, $"Import denied: {keyField?.Name}={key} belongs to another user");
 
             if (CubeDataScope.HasOwner(entity))
             {
                 // ② 已声明归属：必须在当前用户数据范围内
                 if (!CubeDataScope.CanAccess(entity, ctx, false))
-                    throw new NoPermissionException(PermissionFlags.Insert, $"导入数据越权：{keyField?.Name}={key} 归属不在当前数据范围");
+                    throw new NoPermissionException(PermissionFlags.Insert, $"Import denied: {keyField?.Name}={key} is outside the current data scope");
             }
             else if (!insertLike)
             {
                 // ③ 合并类模式：提交行未声明归属，以已存在行判定，防止借 Upsert/Merge 改写不可见行
                 var old = FindImportTarget(factory, entity);
                 if (old != null && !CubeDataScope.CanAccess(old, ctx, false))
-                    throw new NoPermissionException(PermissionFlags.Insert, $"导入数据越权：{keyField?.Name}={key} 将覆盖不可见数据");
+                    throw new NoPermissionException(PermissionFlags.Insert, $"Import denied: {keyField?.Name}={key} would overwrite invisible data");
             }
         }
     }
@@ -365,7 +439,7 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
         var menu = url.IsNullOrEmpty() ? null : mf?.FindByUrl(url) ?? mf?.FindByUrl("~" + url);
 
         if (menu == null || user is not IUser u || !u.Has(menu, PermissionFlags.Insert))
-            throw new NoPermissionException(PermissionFlags.Insert, $"无权导入[{factory.EntityType.FullName}]数据集");
+            throw new NoPermissionException(PermissionFlags.Insert, $"Not allowed to import the [{factory.EntityType.FullName}] data set");
     }
 
     /// <summary>查找导入目标实体中已存在的行（按主键）</summary>
@@ -391,7 +465,7 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
     /// <param name="stream">数据流。可能来自上传文件，也可能来自解压缩文件</param>
     /// <param name="factory">实体工厂。不一定是当前实体类</param>
     /// <param name="page">分页请求参数</param>
-    /// <returns></returns>
+    /// <returns>成功导入的行数</returns>
     protected virtual Int32 ImportExcel(String name, Stream stream, IEntityFactory factory, Pager page)
     {
         using var span = DefaultTracer.Instance?.NewSpan(nameof(ImportExcel), new { name, entity = factory?.EntityType.FullName });
@@ -441,7 +515,7 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
                         sb.AppendFormat("{0}=>{1}", headers[i], fields[i]?.Name);
                     }
                     var map = sb.Return(true);
-                    WriteLog("导入Excel", true, $"表头与字段映射[{headers.Count}]：{map}");
+                    WriteLog(L.T("Import Excel"), true, L.T("Header-to-field mapping [{0}]: {1}", headers.Count, map));
                     span?.AppendTag(map);
                 }
 
@@ -497,8 +571,8 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
             result += OnImport(factory, list, context);
         }
 
-        var msg = $"导入[{name}]，共[{total}]行，成功[{result}]行，{blank}行无效！";
-        WriteLog("导入Excel", true, msg);
+        var msg = L.T("Imported [{0}]: {1} rows total, {2} succeeded, {3} invalid.", name, total, result, blank);
+        WriteLog(L.T("Import Excel"), true, msg);
         span?.Value = result;
 
         return result;
@@ -509,7 +583,7 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
     /// <param name="stream">数据流。可能来自上传文件，也可能来自解压缩文件</param>
     /// <param name="factory">实体工厂。不一定是当前实体类</param>
     /// <param name="page">分页请求参数</param>
-    /// <returns></returns>
+    /// <returns>成功导入的行数</returns>
     protected virtual Int32 ImportCsv(String name, Stream stream, IEntityFactory factory, Pager page)
     {
         using var span = DefaultTracer.Instance?.NewSpan(nameof(ImportCsv), new { name, entity = factory?.EntityType.FullName });
@@ -559,7 +633,7 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
                         sb.AppendFormat("{0}=>{1}", headers[i], fields[i]?.Name);
                     }
                     var map = sb.Return(true);
-                    WriteLog("导入Csv", true, $"表头与字段映射[{headers.Count}]：{map}");
+                    WriteLog(L.T("Import CSV"), true, L.T("Header-to-field mapping [{0}]: {1}", headers.Count, map));
                     span?.AppendTag(map);
                 }
 
@@ -605,8 +679,8 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
             result += OnImport(factory, list, context);
         }
 
-        var msg = $"导入[{name}]，共[{total}]行，成功[{result}]行，{blank}行无效！";
-        WriteLog("导入Csv", true, msg);
+        var msg = L.T("Imported [{0}]: {1} rows total, {2} succeeded, {3} invalid.", name, total, result, blank);
+        WriteLog(L.T("Import CSV"), true, msg);
         span?.Value = result;
 
         return result;
@@ -617,7 +691,7 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
     /// <param name="stream">数据流。可能来自上传文件，也可能来自解压缩文件</param>
     /// <param name="factory">实体工厂。不一定是当前实体类</param>
     /// <param name="page">分页请求参数</param>
-    /// <returns></returns>
+    /// <returns>成功导入的行数</returns>
     protected virtual Int32 ImportJson(String name, Stream stream, IEntityFactory factory, Pager page)
     {
         using var span = DefaultTracer.Instance?.NewSpan(nameof(ImportJson), new { name, entity = factory?.EntityType.FullName });
@@ -635,7 +709,7 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
 
         // 解析json，仅支持数组根节点，其它格式给出明确错误
         var items = json.Decode() as IList<Object>;
-        if (items == null) throw new XException("Json导入仅支持数组格式！");
+        if (items == null) throw new XException("JSON import only supports array format.");
 
         foreach (var item in items)
         {
@@ -677,8 +751,8 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
             result += OnImport(factory, list, context);
         }
 
-        var msg = $"导入[{name}]，共[{total}]行，成功[{result}]行，{blank}行无效！";
-        WriteLog("导入Json", true, msg);
+        var msg = L.T("Imported [{0}]: {1} rows total, {2} succeeded, {3} invalid.", name, total, result, blank);
+        WriteLog(L.T("Import JSON"), true, msg);
         span?.Value = result;
 
         return result;
@@ -689,7 +763,7 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
     /// <param name="stream">数据流。可能来自上传文件，也可能来自解压缩文件</param>
     /// <param name="factory">实体工厂。不一定是当前实体类</param>
     /// <param name="page">分页请求参数</param>
-    /// <returns></returns>
+    /// <returns>成功导入的行数</returns>
     protected virtual Int32 ImportZip(String name, Stream stream, IEntityFactory factory, Pager page)
     {
         using var span = DefaultTracer.Instance?.NewSpan(nameof(ImportZip), new { name, entity = factory?.EntityType.FullName });
@@ -737,8 +811,8 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
             span?.Value = result;
         }
 
-        var msg = $"导入[{name}]，成功[{result}]行！";
-        WriteLog("导入Zip", true, msg);
+        var msg = L.T("Imported [{0}]: {1} rows succeeded.", name, result);
+        WriteLog(L.T("Import ZIP"), true, msg);
         span?.Value = result;
 
         return result;
@@ -782,8 +856,8 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
             result += OnImport(factory, list, context);
         }
 
-        var msg = $"导入[{name}]，共[{total}]行，成功[{result}]行！";
-        WriteLog("导入Db", true, msg);
+        var msg = L.T("Imported [{0}]: {1} rows total, {2} succeeded.", name, total, result);
+        WriteLog(L.T("Import DB"), true, msg);
         span?.Value = result;
 
         return result;
@@ -806,14 +880,22 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
     {
         if (file == null || file.Length == 0)
         {
-            error = "未收到文件";
+            error = L.T("No file was received");
             return false;
         }
 
         var ext = Path.GetExtension(file.FileName);
         if (!ext.IsNullOrEmpty() && _dangerousExtensions.Contains(ext))
         {
-            error = $"禁止上传该类型文件：{ext}";
+            error = L.T("Files of type {0} cannot be uploaded", ext);
+            return false;
+        }
+
+        // 体积上限：防止超大文件耗尽内存与磁盘（0 表示不限制）
+        var maxMb = CubeSetting.Current.UploadMaxSize;
+        if (maxMb > 0 && file.Length > maxMb * 1024L * 1024L)
+        {
+            error = L.T("The file size must not exceed {0} MB.", maxMb);
             return false;
         }
 
@@ -821,22 +903,24 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
         return true;
     }
 
-    /// <summary>上传编辑器文件，关联当前实体</summary>
+    /// <summary>上传附件，关联当前实体。路由为 POST /api/{area}/{controller}/attachments</summary>
     /// <param name="file">上传文件</param>
     /// <param name="id">实体主键。大于零时关联已有实体；为零时属新增场景，以临时实体归类路径，表单保存后通过 attachmentIds 绑定主记录</param>
     /// <param name="title">附件标题（主记录显示名）。为空时使用 entity.ToString()；新增场景下主记录尚未保存，可传入预期标题</param>
     /// <returns>附件编号、文件路径、MIME 类型</returns>
-    [HttpPost]
-    public virtual async Task<ActionResult> UploadFile(IFormFile file, String id = null, String title = null)
+    [HttpPost("/api/[area]/[controller]/attachments")]
+    [EntityAuthorize(PermissionFlags.Insert, PermissionFlags.Update)]
+    [Idempotent]
+    public virtual async Task<ActionResult> Attachments(IFormFile file, String id = null, String title = null)
     {
         if (!ValidateUploadFile(file, out var error))
-            return Json(400, error);
+            return Json(CubeCode.ParamError.ToInt(), error);
 
         TEntity entity;
         if (!id.IsNullOrEmpty())
-            entity = FindData(id) ?? Factory.Create(true) as TEntity;
+            entity = FindData(id) ?? CreateNewEntity();
         else
-            entity = Factory.Create(true) as TEntity;
+            entity = CreateNewEntity();
 
         Attachment att;
         try
@@ -850,11 +934,32 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
         }
         catch (Exception ex)
         {
-            return Json(500, ex.GetTrue()?.Message ?? ex.Message);
+            return Json(0, null, ex);
         }
 
         var url = ViewHelper.GetAttachmentUrl(att);
         return Json(0, null, new { attId = att.Id, filePath = url, contentType = att.ContentType });
+    }
+
+    /// <summary>创建空白实体并清空自增主键</summary>
+    /// <remarks>
+    /// XCode 的 DataScopeInterceptor 会把 IUserScope.UserId 映射到 User.ID，
+    /// 使新建 User 实体带出当前登录用户的主键，进而被误判为编辑并可能覆盖现有数据。
+    /// </remarks>
+    /// <returns>新的实体实例</returns>
+    private TEntity CreateNewEntity()
+    {
+        var entity = Factory.Create(true) as TEntity;
+
+        if (entity != null && Factory.Unique != null)
+        {
+            // 仅清空数值型主键（自增/雪花），字符串与 Guid 主键保持默认值
+            var tc = Type.GetTypeCode(Factory.Unique.Type);
+            if (tc is TypeCode.Int16 or TypeCode.Int32 or TypeCode.Int64 or TypeCode.UInt16 or TypeCode.UInt32 or TypeCode.UInt64)
+                entity[Factory.Unique.Name] = 0;
+        }
+
+        return entity;
     }
 
     /// <summary>从请求 QueryString 或表单中读取 attachmentIds 参数</summary>
@@ -870,7 +975,7 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
 
     /// <summary>将通过独立上传的临时附件绑定到已保存主记录。补写 Key/Title/Url 字段</summary>
     /// <param name="entity">主记录实体，需已保存并持有主键</param>
-    /// <returns></returns>
+    /// <returns>绑定附件后的异步任务</returns>
     protected virtual Task BindAttachments(TEntity entity)
     {
         var ids = GetAttachmentIds();
@@ -901,7 +1006,7 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
     /// <summary>保存所有上传文件，并保存附件访问路径到实体对象的对应属性</summary>
     /// <param name="entity">实体对象</param>
     /// <param name="uploadPath">上传目录。为空时默认UploadPath配置</param>
-    /// <returns></returns>
+    /// <returns>已保存文件的可访问地址列表</returns>
     protected virtual async Task<IList<String>> SaveFiles(TEntity entity, String uploadPath = null)
     {
         var rs = new List<String>();
@@ -999,7 +1104,7 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
         {
             // 写日志
             var type = entity.GetType();
-            var log = LogProvider.Provider.CreateLog(type, "上传", rs, $"上传 {file.FileName} ，目录 {uploadPath} ，保存为 {att.FilePath} " + msg, 0, null, UserHost);
+            var log = LogProvider.Provider.CreateLog(type, L.T("Upload"), rs, L.T("Uploaded {0} to {1}, saved as {2}", file.FileName, uploadPath, att.FilePath) + " " + msg, 0, null, UserHost);
             log.LinkID = id.ToLong();
             log.SaveAsync();
         }
@@ -1012,7 +1117,7 @@ public partial class EntityController<TEntity, TModel> : ReadOnlyEntityControlle
     /// <param name="att">附件实体</param>
     /// <param name="uploadPath">上传目录</param>
     /// <param name="file">上传文件</param>
-    /// <returns></returns>
+    /// <returns>文件保存后的异步任务</returns>
     protected virtual async Task OnFileSaved(TEntity entity, Attachment att, String uploadPath, IFormFile file)
     {
         // 广播指定附件在当前节点可用

@@ -142,9 +142,9 @@ public class RunTimeMiddleware
             var uri = HttpExtensions.GetRawUrl(ctx.Request);
             online?.SetError(ex.Message);
 
-            XTrace.Log.Error("[{0}]的错误[{1}] {2}", uri, ip, ctx.TraceIdentifier);
+            XTrace.Log.Error(L.TLog("[{0}] error [{1}] {2}", uri, ip, ctx.TraceIdentifier));
 
-            LogProvider.Provider?.WriteLog("访问", "错误", false, ex.Message + " " + uri + Environment.NewLine + ex.GetMessage(), user?.ID ?? 0, user + "", ip);
+            LogProvider.Provider?.WriteLog(L.TLog("Access"), L.TLog("Error"), false, ex.Message + " " + uri + Environment.NewLine + ex.GetMessage(), user?.ID ?? 0, user + "", ip);
 
             XTrace.WriteException(ex);
 
@@ -171,7 +171,8 @@ public class RunTimeMiddleware
     }
 
     /// <summary>执行时间字符串</summary>
-    public static String DbRunTimeFormat { get; set; } = "查询{0}次，执行{1}次，耗时{2:n0}毫秒";
+    /// <remarks>英文为源文，展示前按当前语言翻译，缺译文时回退英文</remarks>
+    public static String DbRunTimeFormat { get; set; } = "Queries {0}, executes {1}, elapsed {2:n0} ms";
 
     /// <summary>获取执行时间和查询次数等信息</summary>
     /// <param name="ctx"></param>
@@ -180,7 +181,7 @@ public class RunTimeMiddleware
     {
         if (ctx.Items[nameof(RunTimeInfo)] is not RunTimeInfo rtinf) return null;
 
-        var inf = String.Format(DbRunTimeFormat,
+        var inf = String.Format(L.T(DbRunTimeFormat),
                                 DAL.QueryTimes - rtinf.QueryTimes,
                                 DAL.ExecuteTimes - rtinf.ExecuteTimes,
                                 rtinf.Watch.ElapsedMilliseconds);

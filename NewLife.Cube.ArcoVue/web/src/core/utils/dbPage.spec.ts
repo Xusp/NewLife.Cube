@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Auth } from '@newlifex/page-utils';
+import { Auth } from '@newlifex/cube';
 import { getDbActionPermissions, splitDbDescription } from './dbPage';
 
 describe('数据库页纯函数', () => {

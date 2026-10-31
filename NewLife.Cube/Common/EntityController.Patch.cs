@@ -85,14 +85,14 @@ public partial class EntityController<TEntity, TModel>
     public virtual ApiResponse<FieldPatchResult> PatchFields([FromBody] PatchFieldsRequest request)
     {
         if (request == null || request.Id.IsNullOrEmpty() || request.Values == null || request.Values.Count == 0)
-            throw new ApiException(CubeCode.ParamError.ToInt(), "参数错误：缺少 id 或 values");
+            throw new ApiException(CubeCode.ParamError.ToInt(), "Invalid argument: id or values is missing");
 
         var fields = BuildPatchWhitelist();
         // 未知字段整单 400（与错误表一致）
         foreach (var key in request.Values.Keys)
         {
             if (!fields.ContainsKey(key))
-                throw new ApiException(CubeCode.ParamError.ToInt(), $"未知字段：{key}");
+                throw new ApiException(CubeCode.ParamError.ToInt(), $"Unknown field: {key}");
         }
 
         var ok = 0;
@@ -101,7 +101,7 @@ public partial class EntityController<TEntity, TModel>
         try
         {
             var entity = FindData(request.Id);
-            if (entity == null) throw new Exception("数据不存在");
+            if (entity == null) throw new Exception("Data not found");
 
             foreach (var kv in request.Values)
             {
@@ -109,7 +109,7 @@ public partial class EntityController<TEntity, TModel>
                 entity.SetItem(fi.Name, ChangeTypeValue(kv.Value, fi.Type));
             }
 
-            if (!Valid(entity, DataObjectMethodType.Update, true)) throw new Exception("验证失败");
+            if (!Valid(entity, DataObjectMethodType.Update, true)) throw new Exception("Validation failed");
 
             // 校验头或 EnableFieldValidation 为真时走现有 ValidateEntityFields（与 Insert/Update 同规则）；
             // 局部更新仅校验本次提交字段，避免整实体其它空必填字段误伤
@@ -146,29 +146,29 @@ public partial class EntityController<TEntity, TModel>
     public virtual ApiResponse<FieldPatchResult> BatchUpdateFields([FromBody] BatchUpdateFieldsRequest request)
     {
         if (request == null || request.Keys.IsNullOrEmpty())
-            throw new ApiException(CubeCode.ParamError.ToInt(), "参数错误：缺少 keys");
+            throw new ApiException(CubeCode.ParamError.ToInt(), "Invalid argument: keys is missing");
 
         var ids = ParseKeys(request.Keys);
-        if (ids.Length == 0) throw new ApiException(CubeCode.ParamError.ToInt(), "参数错误：keys 为空");
-        if (ids.Length > 500) throw new ApiException(CubeCode.ParamError.ToInt(), "参数错误：批量更新不能超过 500 条");
+        if (ids.Length == 0) throw new ApiException(CubeCode.ParamError.ToInt(), "Invalid argument: keys is empty");
+        if (ids.Length > 500) throw new ApiException(CubeCode.ParamError.ToInt(), "Invalid argument: a bulk update cannot exceed 500 records");
 
         // 解析字段列表：Fields 多字段优先，否则兼容单字段 Field/Value
         var pairs = new List<(String name, Object value)>();
         if (request.Fields is { Count: > 0 })
         {
             if (request.Fields.Count > 50)
-                throw new ApiException(CubeCode.ParamError.ToInt(), "参数错误：单次批量修改不能超过 50 个字段");
+                throw new ApiException(CubeCode.ParamError.ToInt(), "Invalid argument: a single bulk update cannot change more than 50 fields");
             foreach (var f in request.Fields)
             {
                 if (f.Field.IsNullOrEmpty())
-                    throw new ApiException(CubeCode.ParamError.ToInt(), "参数错误：字段不能为空");
+                    throw new ApiException(CubeCode.ParamError.ToInt(), "Invalid argument: field cannot be empty");
                 pairs.Add((f.Field, f.Value));
             }
         }
         else
         {
             if (request.Field.IsNullOrEmpty())
-                throw new ApiException(CubeCode.ParamError.ToInt(), "参数错误：缺少 field");
+                throw new ApiException(CubeCode.ParamError.ToInt(), "Invalid argument: field is missing");
             pairs.Add((request.Field, request.Value));
         }
 
@@ -178,7 +178,7 @@ public partial class EntityController<TEntity, TModel>
         foreach (var (name, val) in pairs)
         {
             if (!fields.TryGetValue(name, out var fi))
-                throw new ApiException(CubeCode.ParamError.ToInt(), $"未知字段：{name}");
+                throw new ApiException(CubeCode.ParamError.ToInt(), $"Unknown field: {name}");
             Object value;
             try
             {
@@ -210,11 +210,11 @@ public partial class EntityController<TEntity, TModel>
             try
             {
                 var entity = FindData(id);
-                if (entity == null) throw new Exception("数据不存在");
+                if (entity == null) throw new Exception("Data not found");
 
                 foreach (var (fi, value) in items) entity.SetItem(fi.Name, value);
 
-                if (!Valid(entity, DataObjectMethodType.Update, true)) throw new Exception("验证失败");
+                if (!Valid(entity, DataObjectMethodType.Update, true)) throw new Exception("Validation failed");
 
                 if (EnableFieldValidationRequested)
                 {
@@ -263,7 +263,7 @@ public partial class EntityController<TEntity, TModel>
         var dirty = ((IEntity)entity).HasDirty;
         var affected = OnUpdate(entity);
         if (dirty && affected <= 0)
-            throw new Exception("更新未写入数据库");
+            throw new Exception("The update did not write to the database");
     }
 
     /// <summary>把请求值转换到字段类型；可空类型解包。失败抛异常由调用方计入该行 fail</summary>

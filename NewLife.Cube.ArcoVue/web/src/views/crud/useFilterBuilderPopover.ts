@@ -1,5 +1,5 @@
 import { computed, reactive, ref, watch } from 'vue';
-import { hostRefField, isHostRefValue } from '@newlifex/api-core';
+import { hostRefField, isHostRefValue } from '@newlifex/cube';
 import type { FieldMeta } from '@/core/types/field';
 import { normalizeFilter, type ViewFilter, type ViewFilterOp } from '@/core/utils/viewProfile';
 import {

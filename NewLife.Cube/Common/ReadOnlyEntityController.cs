@@ -65,7 +65,7 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
     /// <summary>多行数据列表</summary>
     /// <returns></returns>
     [EntityAuthorize(PermissionFlags.Detail)]
-    [DisplayName("{type}管理")]
+    [DisplayName("{type} management")]
     [HttpGet("/api/[area]/[controller]")]
     public virtual ApiListResponse<TEntity> Index()
     {
@@ -152,7 +152,7 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
                 WorkflowPageOverlay.ApplyRows(list.Cast<IEntity>(), wfPath, wfUser);
             }
         }
-        catch (Exception ex) { XTrace.WriteLine("列表流程覆盖跳过：{0}", ex.Message); }
+        catch (Exception ex) { XTrace.WriteLine("List workflow override skipped: {0}", ex.Message); }
 
         // 字段级脱敏（OSC-2608273d95）：放在行计算与流程覆盖之后，避免派生钩子读到已遮蔽值；无敏感查看权限时敏感列置 ***
         MaskSensitiveList(list);
@@ -203,28 +203,17 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
         }
     }
 
-    /// <summary>查看单行数据</summary>
-    /// <remarks>
-    /// 同时支持两种风格：
-    /// 1) RESTful：<c>/api/[area]/[controller]/{id}</c>，如 /api/Admin/User/21；
-    /// 2) 传统 Action+查询参数：<c>/api/[area]/[controller]/Detail?id=</c>，类级 Route 已生成该字面量路由。
-    /// </remarks>
-    /// <param name="id">主键。可能为空（表示添加），所以用字符串而不是整数</param>
+    /// <summary>查看单行数据。主键在路径中</summary>
+    /// <param name="id">主键</param>
     /// <returns></returns>
     [EntityAuthorize(PermissionFlags.Detail)]
-    [DisplayName("查看{type}")]
-    [HttpGet]
+    [DisplayName("View {type}")]
     [HttpGet("/api/[area]/[controller]/{id}")]
-    public virtual ApiResponse<TEntity> Detail(String id = null)
+    public virtual ApiResponse<TEntity> Detail(String id)
     {
-        // id 必须给默认值 null：action 同时挂有 {id} 模板时，[ApiController] 会把 id 推断为 [FromRoute]
-        // （仅从路由取值），且无默认值的非空引用类型会被隐式推断 [Required]；
-        // 导致传统前端 /Detail?id=xxx 因路由取不到 id 直接报 “The id field is required.”（与 MenuTree/Info 同类）。
-        // 设默认值后走下方 query 兜底，RESTful 路径风格不受影响。
-        if (id.IsNullOrEmpty()) id = Request.Query["id"].ToString();
-        if (id.IsNullOrEmpty()) throw new XException("缺少主键参数！");
+        if (id.IsNullOrEmpty()) throw new XException("Missing primary key.");
         var entity = FindData(id);
-        if (entity == null || (entity as IEntity).IsNullKey) throw new XException("要查看的数据[{0}]不存在！", id);
+        if (entity == null || (entity as IEntity).IsNullKey) throw new XException("The requested data [{0}] does not exist.", id);
 
         // 验证数据权限
         Valid(entity, DataObjectMethodType.Select, false);
@@ -239,7 +228,7 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
                 WorkflowPageOverlay.ApplyRow(entity, wfPath, wfUser);
             }
         }
-        catch (Exception ex) { XTrace.WriteLine("详情流程覆盖跳过：{0}", ex.Message); }
+        catch (Exception ex) { XTrace.WriteLine("Detail workflow override skipped: {0}", ex.Message); }
 
         // 字段级脱敏（OSC-2608273d95）：放在流程覆盖之后、输出之前，与列表时序一致；无 ViewSensitive 权限且非本人时敏感列置 ***
         MaskSensitiveFields(entity);
@@ -250,11 +239,20 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
     #endregion
 
     #region 列表字段和表单字段
-    /// <summary>获取页面元数据。包含页面设置以及列表/表单/搜索字段</summary>
+    /// <summary>是否启用主时间字段区间查询。默认启用，特殊页面或测试可重写关闭</summary>
+    protected virtual Boolean EnableTimeRange => true;
+
+    /// <summary>是否树形列表。树形实体的子类重写为 true，前端据此把扁平列表组装成父子层级</summary>
+    protected virtual Boolean EnableTree => false;
+
+    /// <summary>获取页面元数据。视图自描述，list/form/add/detail/search 各自输出完整字段数组</summary>
+    /// <remarks>
+    /// 默认要求登录（不需要具体权限位）。公开页面需要匿名获取元数据时，在子类重写本方法并标注 <see cref="AllowAnonymousAttribute"/>。
+    /// </remarks>
     /// <returns></returns>
-    [AllowAnonymous]
-    [HttpGet]
-    public virtual ApiResponse<Object> GetPage()
+    [EntityAuthorize]
+    [HttpGet("/api/[area]/[controller]/meta")]
+    public virtual ApiResponse<Object> Meta()
     {
         // 开发模式与系统管理员标志：驱动前端高级菜单显示备份/还原/清空数据表等开发功能（对齐 MVC Develop 条件）
         var user = CurrentUser as IUser ?? ManageProvider.User;
@@ -266,13 +264,14 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
             PageSetting.EnableNavbar,
             PageSetting.EnableToolbar,
             PageSetting.EnableAdd,
-            PageSetting.EnableKey,
             PageSetting.EnableSelect,
             PageSetting.EnableFooter,
             PageSetting.IsReadOnly,
             PageSetting.EnableTableDoubleClick,
             PageSetting.OrderByKey,
             PageSetting.DoubleDelete,
+            // 树形实体：前端据此把扁平列表组装成父子层级并以树形表格渲染
+            tree = EnableTree,
             // 开发模式（SysConfig.Develop），开发功能仅开发模式可用
             develop = SysConfig.Current.Develop,
             // 当前用户是否系统管理员。开发功能仅系统管理员可用
@@ -286,6 +285,8 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
         // List 只取一次：allList 供列设置（未套用户隐藏），克隆后再 Prepare，避免第二次 OnGetFields
         var allList = OnGetFields(ViewKinds.List, null);
         FixSearchMapCandidates(allList);
+        // 配置星尘地址时自动为 TraceId 生成追踪链接（master 新增）
+        PageMetaBuilder.ApplyTraceUrl(allList, CubeSetting.Current.StarWeb);
         var listFields = allList.Clone();
         var list = PrepareFieldsForApi(listFields);
         var addForm = PrepareMapViewFields(ViewKinds.AddForm);
@@ -301,22 +302,34 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
             wfPath = AutomationPaths.ResolveTypePath(typeof(TEntity));
             workflow = WorkflowPageOverlay.GetTypeBlock(wfPath, ManageProvider.User);
         }
-        catch (Exception ex) { XTrace.WriteLine("GetPage workflow 块计算跳过：{0}", ex.Message); }
+        catch (Exception ex) { XTrace.WriteLine("GetPage workflow block skipped: {0}", ex.Message); }
 
-        // 应用当前用户列配置：重排列顺序、标记隐藏字段 Visible=false（React 皮肤列设置）
-        ApplyColumnConfig(list);
-
-        var data = new
+        var data = new Dictionary<String, Object>
         {
-            setting,
-            list,
-            allList,
-            addForm,
-            editForm,
-            detail,
-            search,
-            workflow,
+            ["entity"] = PageMetaBuilder.BuildEntity(Factory.EntityType, Factory),
+            ["setting"] = setting,
+            ["list"] = list,
+            ["allList"] = allList,
+            ["addForm"] = addForm,
+            ["editForm"] = editForm,
+            ["detail"] = detail,
+            ["search"] = search,
+            ["workflow"] = workflow,
         };
+
+        // 工具栏自定义按钮。内置按钮由 setting 控制，这里只下发后端声明的按钮
+        if (PageSetting.EnableToolbar)
+        {
+            var toolbar = OnGetToolbar();
+            if (toolbar != null && toolbar.Count > 0)
+                data["toolbar"] = toolbar.Select(e => e.ToDictionary()).ToList();
+        }
+
+        // 预留的页面 UI 扩展键。核心不解释内容，原样下发给前端 preset / 渲染器消费
+        var ui = OnGetPageUi();
+        if (ui != null && ui.Count > 0) data["ui"] = ui;
+
+        if (CheckNotModified(data)) return null;
 
         return new ApiResponse<Object>
         {
@@ -324,6 +337,12 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
             TraceId = DefaultSpan.Current?.TraceId,
         };
     }
+    #endregion
+
+    #region 工具栏按钮
+    private static ToolbarCollection _Toolbar;
+    /// <summary>工具栏按钮。与字段集合同层，静态声明；区域统一配置建议重写 <see cref="OnBuildToolbar"/></summary>
+    protected static ToolbarCollection Toolbar => _Toolbar ??= new ToolbarCollection();
 
     /// <summary>分享当前视图：签发 UserToken，供匿名以分享者权限打开（有效期可配）</summary>
     /// <remarks>复用 Membership.UserToken + CubeSetting.ShareExpire；Url 锁定到本控制器路径（可带 viewId）。</remarks>
@@ -356,7 +375,7 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
         ut.Expire = DateTime.Now.AddSeconds(expireSec);
         ut.Save();
 
-        WriteLog("分享", true, url);
+        WriteLog("Share", true, url);
 
         return new ApiResponse<Object>
         {
@@ -426,6 +445,14 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
     /// 前端却按「X不可以为空！」拦截整单保存（部门添加表单实测 10 项误拦，添加/编辑整体不可用）。
     /// 现自动推断：仅「非空、无默认值、非审计」的字符串字段必填；控制器显式置 true 的业务特例保留。
     /// </remarks>
+    /// <summary>按表单必填规则设置必填：依据实体 XML 定义生成的类定义元数据自动推断（见 <see cref="FormRequiredHelper"/>），控制器无需逐字段显式设置。</summary>
+    /// <param name="df">字段</param>
+    /// <remarks>
+    /// OSC-260925 修正：旧规则「主键/只读/可空 之外全部必填」把数据库 NOT NULL 列直接等同表单必填，
+    /// 布尔开关、数值（版本/层级/排序/扩展列）、枚举与系统列全部带红星；数值空输入不提交、布尔 false 本是有效值，
+    /// 前端却按「X不可以为空！」拦截整单保存（部门添加表单实测 10 项误拦，添加/编辑整体不可用）。
+    /// 现自动推断：仅「非空、无默认值、非审计」的字符串字段必填；控制器显式置 true 的业务特例保留。
+    /// </remarks>
     protected static void ApplyRequired(DataField df)
     {
         if (df == null) return;
@@ -433,6 +460,26 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
         // 显式置 true 的业务特例保留（推断结果不覆盖显式配置），其余按生成的类定义自动推断
         df.Required = df.Required || FormRequiredHelper.IsRequired(df);
     }
+
+    /// <summary>获取当前页面的工具栏自定义按钮。克隆配置、合并动作特性、按权限过滤</summary>
+    /// <remarks>
+    /// 内置按钮（添加/导入/导出/批量删除/刷新）由 <see cref="PageSetting"/> 控制，这里只处理自定义按钮。
+    /// 区域/项目级统一追加时重写 <see cref="OnBuildToolbar"/>，在权限过滤前加入按钮。
+    /// </remarks>
+    /// <returns></returns>
+    protected virtual IList<ToolbarItem> OnGetToolbar()
+    {
+        var user = CurrentUser as IUser ?? ManageProvider.User as IUser;
+        return ToolbarBuilder.Build(Toolbar, GetType(), OnBuildToolbar, user, Menu);
+    }
+
+    /// <summary>追加工具栏按钮。请求期执行，不依赖静态构造顺序；在权限过滤前调用</summary>
+    /// <param name="toolbar">按钮集合</param>
+    protected virtual void OnBuildToolbar(ToolbarCollection toolbar) { }
+
+    /// <summary>获取页面 UI 扩展。预留键，核心不解释，原样下发给前端</summary>
+    /// <returns>UI 扩展字典；无扩展时返回 null</returns>
+    protected virtual IDictionary<String, Object> OnGetPageUi() => null;
     #endregion
 
     #region 列配置
@@ -440,7 +487,7 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
     /// <param name="list">列表字段集合（就地修改）</param>
     protected virtual void ApplyColumnConfig(List<DataField> list)
     {
-        // 页面路径：优先当前菜单 URL（如 /Cube/App）；菜单不可用时从路由推导（/api/Cube/App/GetPage → /Cube/App）
+        // 页面路径：优先当前菜单 URL（如 /Cube/App）；菜单不可用时从路由推导（/api/Cube/App/meta → /Cube/App）
         var page = Menu?.Url;
         if (page.IsNullOrEmpty())
         {
@@ -478,7 +525,7 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
             list.AddRange(newList);
         }
 
-        // 隐藏列：listHidden 字段名数组 → 从列表移除（前端不再渲染；allList 仍含全部供列设置面板）。
+        // 隐藏列：listHidden 字段名数组 → 从列表移除（前端列设置由 localStorage 维护）。
         // 注意不能仅标记 Visible=false——DataField 序列化只输出 visible=true，false 不发到前端无法区分
         if (cfg.TryGetValue("listHidden", out var hiddenObj) && hiddenObj is System.Collections.IList hidden)
         {
@@ -506,12 +553,12 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
     #endregion
 
     #region 图表
-    /// <summary>获取图表数据。子控制器可重写OnGetChartData来提供图表配置</summary>
+    /// <summary>获取图表数据。子控制器可重写OnGetCharts来提供图表配置</summary>
     /// <returns></returns>
     [EntityAuthorize(PermissionFlags.Detail)]
-    [DisplayName("图表{type}")]
-    [HttpGet]
-    public virtual Object[] GetChartData()
+    [DisplayName("Chart {type}")]
+    [HttpGet("/api/[area]/[controller]/charts")]
+    public virtual Object[] Charts()
     {
         var p = new Pager(WebHelper.Params)
         {
@@ -521,14 +568,14 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
 
         var list = SearchData(p);
 
-        return OnGetChartData(list);
+        return OnGetCharts(list);
     }
 
     /// <summary>构建图表数据。子控制器重写此方法以返回ECharts配置</summary>
     /// <param name="data">搜索得到的数据列表</param>
     /// <returns>ECharts配置数组，每个元素包含 title/option 等属性。无图表时返回空数组</returns>
     [NonAction]
-    protected virtual Object[] OnGetChartData(IEnumerable<TEntity> data) => [];
+    protected virtual Object[] OnGetCharts(IEnumerable<TEntity> data) => [];
     #endregion
 
     #region 导出
@@ -536,9 +583,9 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
     /// <param name="format">导出格式，支持 excel/csv/json/xml，默认 excel</param>
     /// <returns>文件流</returns>
     [EntityAuthorize(PermissionFlags.Detail)]
-    [DisplayName("导出{type}")]
-    [HttpGet]
-    public virtual IActionResult ExportFile(String format = "excel")
+    [DisplayName("Export {type}")]
+    [HttpGet("/api/[area]/[controller]/export")]
+    public virtual IActionResult Export(String format = "excel")
     {
         if (format.IsNullOrEmpty()) format = "excel";
 
@@ -549,7 +596,7 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
             "json" => OnExportJson(),
             "xml" => OnExportXml(),
             "zip" => OnExportZip(),
-            _ => throw new ArgumentOutOfRangeException(nameof(format), $"不支持的导出格式：{format}"),
+            _ => throw new ArgumentOutOfRangeException(nameof(format), L.T("Unsupported export format: {0}", format)),
         };
     }
 
@@ -624,7 +671,7 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
         var p = GetCachePager();
         OnExportZip(dic, p);
 
-        WriteLog("导出Zip", true, $"开始导出[{dic.Keys.Join()}]");
+        WriteLog(L.T("Export ZIP"), true, L.T("Start exporting [{0}].", dic.Keys.Join()));
 
         var ms = new MemoryStream();
         using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
@@ -691,6 +738,8 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
     protected List<DataField> GetExportFields(IList<FieldItem> fs, IEnumerable<TEntity> list)
     {
         var fields = fs.Select(e => new DataField(e)).ToList();
+        foreach (var field in fields) field.Localize();
+
         if (list.FirstOrDefault() is IExtend ext)
         {
             foreach (var item in ext.Items)
@@ -810,16 +859,16 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
     /// <returns></returns>
     /// <exception cref="InvalidOperationException">非开发模式或非系统管理员时抛出</exception>
     [EntityAuthorize(PermissionFlags.Detail)]
-    [DisplayName("高级开发")]
+    [DisplayName("Advanced development")]
     // 必须带模板：无模板的 [HttpGet] 与 Index 的 [HttpGet] 同挂类级路由，GET 请求会 AmbiguousMatchException；
     // 显式 "Develop" 模板对齐 MVC 版 /Controller/Develop?act= 形态（NC 版走约定路由不受影响）
     [HttpGet("Develop")]
     public virtual async Task<ActionResult> Develop(String act)
     {
-        if (!SysConfig.Current.Develop) throw new InvalidOperationException("仅支持开发模式下使用！");
+        if (!SysConfig.Current.Develop) throw new InvalidOperationException(L.T("Only available in development mode."));
 
         var user = CurrentUser as IUser ?? ManageProvider.User;
-        if (user == null || !user.Roles.Any(e => e.IsSystem)) throw new InvalidOperationException("仅支持系统管理员使用！");
+        if (user == null || !user.Roles.Any(e => e.IsSystem)) throw new InvalidOperationException(L.T("Only available to system administrators."));
 
         return act switch
         {
@@ -827,7 +876,7 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
             "BackupAndExport" => await BackupAndExport(),
             "Restore" => Restore(),
             "Clear" => Clear(),
-            _ => throw new NotSupportedException($"未支持[{act}]"),
+            _ => throw new NotSupportedException(L.T("Unsupported operation [{0}]", act)),
         };
     }
 
@@ -838,19 +887,19 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
     {
         // 排除 act 参数后，若还有其它查询参数，禁止全表清空（对齐 MVC：page.Params.Count > 0 拒绝）
         if (WebHelper.Params.Keys.Any(e => !e.EqualIgnoreCase("act")))
-            throw new InvalidOperationException("当前带有查询参数，为免误解，禁止全表清空！");
+            throw new InvalidOperationException(L.T("Query parameters are present; clearing the whole table is not allowed."));
 
         try
         {
             var count = Entity<TEntity>.Meta.Session.Truncate();
 
-            WriteLog("清空数据", true, $"共删除{count}行数据");
+            WriteLog(L.T("Clear data"), true, L.T("Deleted {0} rows.", count));
 
-            return Json(0, $"共删除{count}行数据");
+            return Json(0, L.T("Deleted {0} rows.", count));
         }
         catch (Exception ex)
         {
-            WriteLog("清空数据", false, ex.GetMessage());
+            WriteLog(L.T("Clear data"), false, ex.GetMessage());
 
             throw;
         }
@@ -867,7 +916,7 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
 
             var fact = Factory;
             if (fact.Session.Count > set.MaxBackup)
-                throw new XException($"数据量[{fact.Session.Count:n0}>{set.MaxBackup:n0}]，禁止备份！");
+                throw new XException("Data count [{0:n0}] exceeds the backup limit [{1:n0}]; backup is not allowed.", fact.Session.Count, set.MaxBackup);
 
             var dal = fact.Session.Dal;
 
@@ -879,38 +928,39 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
             // 异步执行备份，阻塞等待一点时间，避免前端超时。
             var task = Task.Factory.StartNew(() =>
             {
-                WriteLog("备份", true, $"开始备份[{name}]到[{fileName}]");
+                WriteLog(L.T("Backup"), true, L.T("Start backing up [{0}] to [{1}].", name, fileName));
                 try
                 {
                     var rs = 0;
                     var sw = Stopwatch.StartNew();
                     {
-                        using var fs = new FileStream(bak, FileMode.OpenOrCreate);
+                        // 文件名只精确到秒，同一秒内二次备份会命中同一文件；用 Create 截断，避免残留旧内容导致 gz 损坏
+                        using var fs = new FileStream(bak, FileMode.Create);
                         using var gs = new GZipStream(fs, CompressionLevel.SmallestSize, true);
                         rs = dal.Backup(fact.Table.DataTable, gs, default);
                         sw.Stop();
                     }
 
                     var fi = bak.AsFile();
-                    WriteLog("备份", true, $"备份[{name}]到[{fileName}]（{rs:n0}行）（{fi.Length.ToGMK()}字节）成功！耗时：{sw.Elapsed}");
+                    WriteLog(L.T("Backup"), true, L.T("Backup [{0}] to [{1}] ({2:n0} rows, {3} bytes) succeeded. Elapsed: {4}", name, fileName, rs, fi.Length.ToGMK(), sw.Elapsed));
                     return rs;
                 }
                 catch (Exception ex)
                 {
-                    WriteLog("备份", false, $"备份[{fileName}]失败！{ex.GetMessage()}");
+                    WriteLog(L.T("Backup"), false, L.T("Backup [{0}] failed! {1}", fileName, ex.GetMessage()));
                     return -1;
                 }
             }, TaskCreationOptions.LongRunning);
             if (task.Wait(5_000))
-                return Json(0, $"备份[{fileName}]（{task.Result:n0}行）成功！");
+                return Json(0, L.T("Backup [{0}] ({1:n0} rows) succeeded.", fileName, task.Result));
             else
-                return Json(0, $"备份[{fileName}]后台执行中……");
+                return Json(0, L.T("Backup [{0}] is running in the background...", fileName));
         }
         catch (Exception ex)
         {
             XTrace.WriteException(ex);
 
-            WriteLog("备份", false, ex.GetMessage());
+            WriteLog(L.T("Backup"), false, ex.GetMessage());
 
             return Json(500, null, ex);
         }
@@ -926,7 +976,7 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
 
         var fact = Factory;
         if (fact.Session.Count > set.MaxBackup)
-            throw new XException($"数据量[{fact.Session.Count:n0}>{set.MaxBackup:n0}]，禁止备份！");
+            throw new XException("Data count [{0:n0}] exceeds the backup limit [{1:n0}]; backup is not allowed.", fact.Session.Count, set.MaxBackup);
 
         var dal = fact.Session.Dal;
 
@@ -943,14 +993,14 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
         var ms = Response.Body;
         try
         {
-            WriteLog("备份导出", true, $"开始备份导出[{name}]");
+            WriteLog(L.T("Backup export"), true, L.T("Start backup export [{0}].", name));
 
             var sw = Stopwatch.StartNew();
             await using var gs = new GZipStream(ms, CompressionLevel.SmallestSize, true);
             var count = dal.Backup(fact.Table.DataTable, gs, HttpContext.RequestAborted);
             sw.Stop();
 
-            WriteLog("备份导出", true, $"备份[{name}]（{count:n0}行）成功！耗时：{sw.Elapsed}");
+            WriteLog(L.T("Backup export"), true, L.T("Backup [{0}] ({1:n0} rows) succeeded. Elapsed: {2}", name, count, sw.Elapsed));
 
             return new EmptyResult();
         }
@@ -958,7 +1008,7 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
         {
             XTrace.WriteException(ex);
 
-            WriteLog("备份导出", false, ex.GetMessage());
+            WriteLog(L.T("Backup export"), false, ex.GetMessage());
 
             return Json(500, null, ex);
         }
@@ -979,40 +1029,52 @@ public partial class ReadOnlyEntityController<TEntity> : ControllerBaseX, IEntit
 
             var di = NewLife.Setting.Current.BackupPath.GetBasePath().AsDirectory();
             var fi = di?.GetFiles(fileName)?.OrderByDescending(e => e.Name).FirstOrDefault();
-            if (fi == null || !fi.Exists) throw new XException($"找不到[{fileName}]的备份文件");
+            if (fi == null || !fi.Exists) throw new XException("Backup file [{0}] not found.", fileName);
 
             // 异步执行恢复，阻塞等待一点时间，避免前端超时。
             var task = Task.Factory.StartNew(() =>
             {
-                WriteLog("恢复", true, $"开始恢复[{fileName}]到[{name}]（{fi.Length.ToGMK()}字节）");
+                WriteLog(L.T("Restore"), true, L.T("Start restoring [{0}] to [{1}] ({2} bytes).", fileName, name, fi.Length.ToGMK()));
                 try
                 {
                     var sw = Stopwatch.StartNew();
+                    var before = fact.FindCount();
                     using var fs = fi.OpenRead();
                     using var gs = new GZipStream(fs, CompressionMode.Decompress, true);
-                    var rs = dal.Restore(gs, fact.Table.DataTable, default);
+                    var read = dal.Restore(gs, fact.Table.DataTable, default);
+                    var written = (Int32)(fact.FindCount() - before);
                     sw.Stop();
 
-                    WriteLog("恢复", true, $"恢复[{fileName}]（{rs:n0}行）成功！");
-                    return rs;
+                    // dal.Restore 返回的是从备份包读取的行数，主键冲突时整批写入失败且异常被写入Actor吞掉，
+                    // 必须核对实际写入行数，避免“提示还原成功但一行都没写回”的静默失败
+                    if (read > 0 && written < read)
+                    {
+                        WriteLog(L.T("Restore"), false, L.T("Restore [{0}] wrote only {1:n0} of {2:n0} rows because the table already holds conflicting rows. Clear the table before restoring.", fileName, written, read));
+                        return -1;
+                    }
+
+                    WriteLog(L.T("Restore"), true, L.T("Restore [{0}] ({1:n0} rows) succeeded.", fileName, written));
+                    return written;
                 }
                 catch (Exception ex)
                 {
-                    WriteLog("恢复", false, $"恢复[{fileName}]失败！{ex.GetMessage()}");
+                    WriteLog(L.T("Restore"), false, L.T("Restore [{0}] failed! {1}", fileName, ex.GetMessage()));
                     return -1;
                 }
             }, TaskCreationOptions.LongRunning);
 
             if (task.Wait(5_000))
-                return Json(0, $"恢复[{fileName}]（{task.Result:n0}行）成功！");
+                return task.Result >= 0
+                    ? Json(0, L.T("Restore [{0}] ({1:n0} rows) succeeded.", fileName, task.Result))
+                    : Json(500, L.T("Restore [{0}] failed because the table already holds conflicting rows. Clear the table before restoring.", fileName));
             else
-                return Json(0, $"恢复[{fileName}]后台执行中……");
+                return Json(0, L.T("Restore [{0}] is running in the background...", fileName));
         }
         catch (Exception ex)
         {
             XTrace.WriteException(ex);
 
-            WriteLog("恢复", false, ex.GetMessage());
+            WriteLog(L.T("Restore"), false, ex.GetMessage());
 
             return Json(500, null, ex);
         }

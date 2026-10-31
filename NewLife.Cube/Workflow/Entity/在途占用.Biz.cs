@@ -55,8 +55,8 @@ public partial class WorkflowOccupancy : Entity<WorkflowOccupancy>
         if (!HasDirty) return true;
 
         // 这里验证参数范围，建议抛出参数异常，指定参数名，前端用户界面可以捕获参数异常并聚焦到对应的参数输入框
-        if (TypePath.IsNullOrEmpty()) throw new ArgumentNullException(nameof(TypePath), "实体路径不能为空！");
-        if (EntityKey.IsNullOrEmpty()) throw new ArgumentNullException(nameof(EntityKey), "业务主键不能为空！");
+        if (TypePath.IsNullOrEmpty()) throw new ArgumentNullException(nameof(TypePath), "Entity path cannot be empty.");
+        if (EntityKey.IsNullOrEmpty()) throw new ArgumentNullException(nameof(EntityKey), "Business key cannot be empty.");
 
         // 建议先调用基类方法，基类方法会做一些统一处理
         if (!base.Valid(method)) return false;

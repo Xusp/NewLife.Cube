@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.ComponentModel;
 using NewLife;
 using NewLife.Cube;
@@ -127,7 +127,6 @@ public class LovEntityGuardTests : IDisposable
     #region 夹具
     private readonly IManageProvider? _oldProvider;
     private readonly Boolean _oldEnableTenant;
-    private readonly TenantEnforceModes _oldEnforceMode;
     private readonly TenantQueryPolicies _oldQueryPolicy;
     private readonly TenantContext? _oldTenant;
 
@@ -138,7 +137,6 @@ public class LovEntityGuardTests : IDisposable
 
         _oldProvider = ManageProvider.Provider;
         _oldEnableTenant = CubeSetting.Current.EnableTenant;
-        _oldEnforceMode = CubeSetting.Current.TenantEnforceMode;
         _oldQueryPolicy = CubeSetting.Current.TenantQueryPolicy;
         _oldTenant = TenantContext.Current;
     }
@@ -147,7 +145,6 @@ public class LovEntityGuardTests : IDisposable
     {
         ManageProvider.Provider = _oldProvider;
         CubeSetting.Current.EnableTenant = _oldEnableTenant;
-        CubeSetting.Current.TenantEnforceMode = _oldEnforceMode;
         CubeSetting.Current.TenantQueryPolicy = _oldQueryPolicy;
         TenantContext.Current = _oldTenant;
     }
@@ -225,10 +222,9 @@ public class LovEntityGuardTests : IDisposable
     }
 
     /// <summary>开启多租户并清空租户上下文</summary>
-    private static void EnableTenant(TenantEnforceModes mode)
+    private static void EnableTenant()
     {
         CubeSetting.Current.EnableTenant = true;
-        CubeSetting.Current.TenantEnforceMode = mode;
         TenantContext.Current = null!;
     }
     #endregion
@@ -287,7 +283,7 @@ public class LovEntityGuardTests : IDisposable
     [Fact(DisplayName = "租户_Enforce无上下文_空集且单行拒绝")]
     public void Tenant_Enforce_NoContext_FailClosed()
     {
-        EnableTenant(TenantEnforceModes.Enforce);
+        EnableTenant();
 
         Assert.Equal("1=0", TenantScopeHelper.GetFilter(LovGuardScope.Meta.Factory));
 
@@ -301,21 +297,11 @@ public class LovEntityGuardTests : IDisposable
         Assert.NotNull(LovEntityGuard.GetFilter(LovGuardScope.Meta.Factory));
     }
 
-    [Fact(DisplayName = "租户_Shadow无上下文_兼容放行")]
-    public void Tenant_Shadow_NoContext_PassThrough()
-    {
-        EnableTenant(TenantEnforceModes.Shadow);
-
-        Assert.Null(TenantScopeHelper.GetFilter(LovGuardScope.Meta.Factory));
-        Assert.Null(TenantScopeHelper.GetExpression(LovGuardScope.Meta.Factory));
-        Assert.True(TenantScopeHelper.CanAccess(LovGuardScope.Meta.Factory, new LovGuardScope { Id = 1, TenantId = 3 }));
-    }
-
     [Fact(DisplayName = "租户_租户模式_按TenantId过滤")]
     public void Tenant_TenantMode_FiltersByTenantId()
     {
         var tenant = CreateTenant();
-        EnableTenant(TenantEnforceModes.Enforce);
+        EnableTenant();
         TenantContext.Current = new TenantContext { TenantId = tenant.Id };
 
         Assert.Equal("TenantId={#TenantId}", TenantScopeHelper.GetFilter(LovGuardScope.Meta.Factory));
@@ -333,7 +319,6 @@ public class LovEntityGuardTests : IDisposable
     public void Tenant_ThrowOnMissingTenant_Throws()
     {
         CubeSetting.Current.EnableTenant = true;
-        CubeSetting.Current.TenantEnforceMode = TenantEnforceModes.Enforce;
         CubeSetting.Current.TenantQueryPolicy = TenantQueryPolicies.ThrowOnMissingTenant;
         TenantContext.Current = null!;
 
@@ -343,7 +328,7 @@ public class LovEntityGuardTests : IDisposable
     [Fact(DisplayName = "租户_非租户实体_不介入")]
     public void Tenant_NonTenantEntity_NotApplied()
     {
-        EnableTenant(TenantEnforceModes.Enforce);
+        EnableTenant();
 
         Assert.Null(TenantScopeHelper.GetFilter(LovGuardPlain.Meta.Factory));
         Assert.True(TenantScopeHelper.CanAccess(LovGuardPlain.Meta.Factory, new LovGuardPlain { Id = 1, Name = "x" }));
@@ -388,7 +373,7 @@ public class LovEntityGuardTests : IDisposable
     public void Guard_SystemRole_TenantStillApplies()
     {
         SetUser(CreateUser(null, PermissionFlags.None, isSystem: true));
-        EnableTenant(TenantEnforceModes.Enforce);
+        EnableTenant();
 
         var exp = LovEntityGuard.GetFilter(LovGuardScope.Meta.Factory);
 

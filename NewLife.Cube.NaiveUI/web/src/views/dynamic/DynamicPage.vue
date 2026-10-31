@@ -1,7 +1,7 @@
 <template>
   <div class="dynamic-page">
-    <!-- ECharts 图表区域 -->
-    <n-card v-if="chartList.length" size="small" style="margin-bottom: 16px">
+    <!-- ECharts 图表区域（图表视图） -->
+    <n-card v-if="viewMode === 'chart' && chartList.length" size="small" style="margin-bottom: 16px">
       <div
         v-for="(_, idx) in chartList"
         :key="idx"
@@ -9,6 +9,7 @@
         style="width: 100%; height: 400px"
       />
     </n-card>
+    <n-empty v-else-if="viewMode === 'chart'" description="暂无图表" style="margin-bottom: 16px" />
 
     <!-- 搜索栏 -->
     <n-card v-if="searchFields.length" size="small" style="margin-bottom: 16px">
@@ -41,11 +42,13 @@
           </template>
           确认删除选中的 {{ checkedKeys.length }} 条记录？
         </n-popconfirm>
+        <n-button @click="toggleView">{{ viewMode === 'table' ? '图表' : '表格' }}</n-button>
       </n-space>
     </div>
 
     <!-- 数据表格 -->
     <n-data-table
+      v-show="viewMode === 'table'"
       :columns="tableColumns"
       :data="tableData"
       :loading="loading"
@@ -54,6 +57,7 @@
       @update:checked-row-keys="(keys: any[]) => (checkedKeys = keys)"
       :pagination="pagination"
       :summary="statSummary"
+      :scroll-x="tableScrollX"
       remote
       @update:page="loadData"
       @update:page-size="handlePageSizeChange"
@@ -99,11 +103,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, nextTick, markRaw, h, type Ref } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, markRaw, h, watch, type Ref } from 'vue';
 import { NButton, NSpace, NTag, NIcon, useMessage, type DataTableColumn, type DataTableCreateSummary, type FormInst, type PaginationProps, type UploadCustomRequestOptions } from 'naive-ui';
 import { ArrowDown as ArrowDownIcon } from '@vicons/ionicons5';
-import { Auth, type DataField } from '@newlifex/api-core';
-import { resolveWidgets, type FieldMapping } from '@newlifex/field-mapping';
+import { Auth, type DataField } from '@newlifex/cube';
+import { resolveWidgets, resolveColumnWidth, resolveColumnAlign, type FieldMapping } from '@newlifex/cube';
+import { normalizeChartList, shouldDisposeCharts, toggleListView, validateRequiredFields } from '@newlifex/cube';
 import * as echarts from 'echarts';
 import api from '@/api';
 import { useUserStore } from '@/stores/user';
@@ -206,7 +211,8 @@ const tableColumns = computed<DataTableColumn[]>(() => {
     const col: DataTableColumn = {
       key: m.field.name,
       title: m.field.displayName ?? m.field.name,
-      width: m.field.maxWidth,
+      width: resolveColumnWidth(m.field),
+      align: resolveColumnAlign(m.field),
       ellipsis: { tooltip: true },
     };
 
@@ -265,6 +271,11 @@ const tableColumns = computed<DataTableColumn[]>(() => {
 
   return cols;
 });
+
+/** 横向滚动兜底宽度：固定列按实际宽度，自适应列按 140px 估算，窄屏下表格横向滚动而不是挤压变形 */
+const tableScrollX = computed(() =>
+  tableColumns.value.reduce((sum, col) => sum + (typeof col.width === 'number' ? col.width : 140), 0)
+);
 
 // --- 数据加载 ---
 async function loadFields() {
@@ -336,6 +347,11 @@ async function showEdit(row: Record<string, any>) {
 
 async function handleSubmit() {
   try {
+    const invalid = validateRequiredFields(formFields.value as any, editForm.value);
+    if (invalid.length) {
+      message.error(invalid.map((e) => e.message).join('；'));
+      return;
+    }
     await editFormRef.value?.validate();
   } catch {
     return false;
@@ -409,14 +425,26 @@ async function handleImport({ file }: UploadCustomRequestOptions) {
 }
 
 // --- ECharts ---
+/** 视图模式：表格 / 图表 */
+const viewMode = ref<'table' | 'chart'>('table');
+
+function toggleView() {
+  viewMode.value = toggleListView(viewMode.value);
+}
+
+// 离开图表视图时释放实例，避免隐藏容器尺寸为 0 导致图表错位
+watch(viewMode, (mode) => {
+  if (!shouldDisposeCharts(mode)) return;
+  for (const inst of chartInstances.value) {
+    inst?.dispose();
+  }
+  chartInstances.value = [];
+});
+
 async function loadChartData() {
   try {
     const res = await api.page.getChartData(props.type);
-    if (Array.isArray(res.data) && res.data.length > 0) {
-      chartList.value = res.data;
-    } else {
-      chartList.value = [];
-    }
+    chartList.value = normalizeChartList(res.data);
   } catch {
     chartList.value = [];
   }

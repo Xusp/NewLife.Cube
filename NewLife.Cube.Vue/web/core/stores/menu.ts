@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { getConfig } from '@newlifex/cube-vue/core/configure';
 import { getDataByKey } from '../utils/common';
+import { normalizeMenuUrl } from '../utils/url';
 import { type AxiosRequestConfig } from 'axios';
 import request from '../utils/request';
 
@@ -85,12 +86,10 @@ export function convertTreeMenuToFlatMenu(
 /** 将菜单数据按照配置的字段名称进行转换，支持平铺数据和树形数据 */
 const covertMenu = (list: Record<string, unknown>[]): TreeMenuItem[] => {
   const menuConfig = getConfig().menu;
-  const visibleField = menuConfig.visibleField;
 
   const convertItem = (item: Record<string, unknown>): TreeMenuItem | null => {
-    // 可见性过滤：visible === false 时跳过该节点及其子树
-    if (visibleField && item[visibleField] === false) return null;
-
+    // 隐藏菜单（visible=false）照常保留：它仍需要注册路由（隐藏页可被链接/其它页面跳转打开），
+    // 只是在导航、全局搜索等渲染处按 visible 过滤。后端 BuildMenuTree 同样保留隐藏菜单下发。
     const children = item[menuConfig.childrenField] as Record<string, unknown>[] | undefined;
     return {
       id: item[menuConfig.idField] as string,
@@ -157,7 +156,11 @@ export const useMenuStore = defineStore('menu', {
       this.activeMenu = menu;
     },
     setActiveMenuByPath(path: string) {
-      const activeMenu = this.flatMenus?.find((item) => item.path === path);
+      // 高亮匹配须与路由命名风格一致：flatMenus 存的是后端原始 URL（PascalCase），
+      // 而传入 path 是按配置风格归一化后的当前路由路径。pascal 下两边同值恰好相等；
+      // kebab 等风格下若直接精确比较会失配、导致左侧高亮丢失，故先按同一风格归一化再比。
+      const { router: { routeNamingStyle } } = getConfig();
+      const activeMenu = this.flatMenus?.find((item) => normalizeMenuUrl(item.path, routeNamingStyle) === path);
       this.setActiveMenu(activeMenu as TreeMenuItem);
     },
     /** 标记路由已注册 */
@@ -183,13 +186,13 @@ export const useMenuStore = defineStore('menu', {
             try {
               const res = await request(requestConfig);
               if (!res) {
-                throw new Error('获取菜单数据失败');
+                throw new Error('Failed to get menu data');
               }
 
               const data = getDataByKey(res as never, menuConfig.dataKey);
 
               if (!data) {
-                throw new Error('获取菜单数据失败');
+                throw new Error('Failed to get menu data');
               }
 
               if (menuConfig.isMenuTree) {
@@ -202,7 +205,7 @@ export const useMenuStore = defineStore('menu', {
               }
               this.setActiveMenuByPath(window.location.pathname);
             } catch (error) {
-              console.error('获取菜单失败:', error);
+              console.error('Failed to get menus:', error);
               throw error;
             }
           };
@@ -221,7 +224,7 @@ export const useMenuStore = defineStore('menu', {
             await processMenuRequestAsync(getMenuAxiosConfig);
           }
         } catch (error) {
-          console.error('加载菜单配置失败:', error);
+          console.error('Failed to load menu configuration:', error);
         } finally {
           // 增加延时，避免下面的赋值触发更新再次请求
           setTimeout(() => {

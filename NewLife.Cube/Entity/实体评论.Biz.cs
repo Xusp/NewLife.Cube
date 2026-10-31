@@ -57,8 +57,8 @@ public partial class EntityComment : Entity<EntityComment>
         if (!HasDirty) return true;
 
         // 这里验证参数范围，建议抛出参数异常，指定参数名，前端用户界面可以捕获参数异常并聚焦到对应的参数输入框
-        if (Category.IsNullOrEmpty()) throw new ArgumentNullException(nameof(Category), "分类不能为空！");
-        if (Content == null) throw new ArgumentNullException(nameof(Content), "内容不能为空！");
+        if (Category.IsNullOrEmpty()) throw new ArgumentNullException(nameof(Category), "Category cannot be empty.");
+        if (Content == null) throw new ArgumentNullException(nameof(Content), "Content cannot be empty.");
 
         // 建议先调用基类方法，基类方法会做一些统一处理
         if (!base.Valid(method)) return false;
@@ -150,9 +150,9 @@ public partial class EntityComment : Entity<EntityComment>
         if (parentId > 0)
         {
             parent = FindById(parentId);
-            if (parent == null) throw new ArgumentOutOfRangeException(nameof(parentId), "父评论不存在");
+            if (parent == null) throw new ArgumentOutOfRangeException(nameof(parentId), "Parent comment does not exist");
             if (!parent.Category.EqualIgnoreCase(category) || parent.LinkId != linkId)
-                throw new ArgumentException("父评论与当前业务记录不匹配", nameof(parentId));
+                throw new ArgumentException("Parent comment does not belong to the current business record", nameof(parentId));
         }
 
         var entity = new EntityComment

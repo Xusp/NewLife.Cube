@@ -1,4 +1,4 @@
-import type { WorkflowInstanceDetail, WorkflowTaskItem } from '@newlifex/api-core';
+import type { WorkflowInstanceDetail, WorkflowTaskItem } from '@newlifex/cube';
 import type { WfGraphData, WfGraphNodeData } from '@/core/types/workflow';
 import { wfNodeTypeLabel } from '@/core/types/workflow';
 import { parseGraph } from './useWorkflowDesigner';

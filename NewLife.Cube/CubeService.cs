@@ -72,7 +72,7 @@ public static class CubeService
 
         using var span = DefaultTracer.Instance?.NewSpan(nameof(AddCube));
 
-        XTrace.WriteLine("{0} Start 配置魔方 {0}", new String('=', 32));
+        XTrace.WriteLine("{0} Start configuring Cube {0}", new String('=', 32));
         Assembly.GetExecutingAssembly().WriteVersion();
 
         // 修正系统名，确保可运行
@@ -80,7 +80,9 @@ public static class CubeService
         if (sys.Name == "NewLife.Cube.Views" || sys.DisplayName == "NewLife.Cube.Views")
         {
             sys.Name = "NewLife.Cube";
-            sys.DisplayName = "魔方平台";
+            // 站点显示名属于业务数据（登录页直接展示、可在设置页修改），只修历史默认值；
+            // 菜单等元数据才要求「只落库源文，渲染期翻译」
+            sys.DisplayName = L.T("Cube platform");
             sys.Save();
         }
 
@@ -89,6 +91,9 @@ public static class CubeService
 
         var set = CubeSetting.Current;
         services.AddSingleton(set);
+
+        // 请求级多语言：?lang= / Cookie / Accept-Language，缺省跟随系统
+        services.AddCubeLocalization();
 
         // 租户上下文。封装静态 AsyncLocal 的无状态门面，注册为 Singleton 以避免被 Singleton 服务（如 UserService）捕获 scoped 依赖；租户状态本身由 AsyncLocal 按请求隔离
         services.AddSingleton<ITenantContext, TenantContextService>();
@@ -106,12 +111,17 @@ public static class CubeService
             .SetIsOriginAllowed(hostname => true)
             .WithExposedHeaders("X-Cube-Filter-Narrowed")));
         else if (!set.CorsOrigins.IsNullOrEmpty())
-            services.AddCors(options => options.AddPolicy("cube_cors", builder => builder
-            .AllowAnyMethod()
-            .AllowAnyHeader()
-            .AllowCredentials()
-            .WithOrigins(set.CorsOrigins)
-            .WithExposedHeaders("X-Cube-Filter-Narrowed")));
+        {
+            // 支持逗号/分号分隔的多个来源，逐项放行。整串作为一个来源会导致多来源配置永远匹配不上
+            var origins = set.CorsOrigins.Split(",", ";").Select(e => e.Trim()).Where(e => e.Length > 0).ToArray();
+            if (origins.Length > 0)
+                services.AddCors(options => options.AddPolicy("cube_cors", builder => builder
+                .AllowAnyMethod()
+                .AllowAnyHeader()
+                .AllowCredentials()
+                .WithOrigins(origins)
+                .WithExposedHeaders("X-Cube-Filter-Narrowed")));
+        }
 
         // 关闭「非空引用类型属性被 MVC 隐式推断为 [Required]」（与 CubeNC 的 EntityValidationMetadataProvider 目标一致）。
         // 项目启用 Nullable 标注后，实体（TModel）中的 String 属性无默认值时被隐式必填；前端表单按需提交字段
@@ -179,10 +189,10 @@ public static class CubeService
                             var method = context.HttpContext.Request.Method;
                             var hint = method.ToUpperInvariant() switch
                             {
-                                "POST" => "请求数据格式不正确，请检查是否传递了正确的JSON对象",
-                                "PUT" => "请求数据格式不正确，请检查是否传递了正确的JSON对象",
-                                "DELETE" => "请求参数格式不正确，请检查ID值是否有效",
-                                _ => "请求数据格式不正确"
+                                "POST" => L.T("Invalid request body. Make sure a valid JSON object is sent."),
+                                "PUT" => L.T("Invalid request body. Make sure a valid JSON object is sent."),
+                                "DELETE" => L.T("Invalid request parameters. Make sure the id is valid."),
+                                _ => L.T("Invalid request body")
                             };
                             fieldErrors.Add(new FieldError
                             {
@@ -211,7 +221,7 @@ public static class CubeService
                     }
                 }
 
-                var firstMsg = fieldErrors.Count > 0 ? fieldErrors[0].Message : "请求参数错误";
+                var firstMsg = fieldErrors.Count > 0 ? fieldErrors[0].Message : L.T("Invalid request parameters");
                 var response = new ApiResponse<Object>
                 {
                     Code = Models.CubeCode.ParamError.ToInt(),
@@ -288,21 +298,24 @@ public static class CubeService
         // 注册IP地址库
         IpResolver.Register();
 
+        // 前端皮肤。皮肤包通过 ICubeSkin 自动发现，支持设置项切换与运行时切换
+        services.AddSingleton<CubeSkinManager>();
+
         // 插件
         var moduleManager = new ModuleManager();
         services.AddSingleton(moduleManager);
         var modules = moduleManager.LoadAll(services);
         if (modules.Count > 0)
         {
-            XTrace.WriteLine("加载功能插件[{0}]个", modules.Count);
+            XTrace.WriteLine("Loaded {0} feature plugins", modules.Count);
             foreach (var item in modules)
             {
-                XTrace.WriteLine("加载插件：{0}", item.Key);
+                XTrace.WriteLine("Loading plugin: {0}", item.Key);
                 item.Value.Add(services);
             }
         }
 
-        XTrace.WriteLine("{0} End   配置魔方 {0}", new String('=', 32));
+        XTrace.WriteLine("{0} End   configuring Cube {0}", new String('=', 32));
 
         return services;
     }
@@ -318,7 +331,7 @@ public static class CubeService
         var provider = app.ApplicationServices;
         using var span = DefaultTracer.Instance?.NewSpan(nameof(UseCube));
 
-        XTrace.WriteLine("{0} Start 初始化魔方 {0}", new String('=', 32));
+        XTrace.WriteLine("{0} Start initializing Cube {0}", new String('=', 32));
 
         // 初始化数据库连接
         var set = CubeSetting.Current;
@@ -356,6 +369,19 @@ public static class CubeService
         // 配置静态Http上下文访问器
         app.UseStaticHttpContext();
 
+        // 请求级语言识别，必须早于任何产生用户可见消息的中间件
+        app.UseCubeLocalization();
+
+        // PUT 的 JSON 请求体允许重复读取：更新时据此判断"实际提交了哪些字段"，实现真正的部分更新
+        app.Use(async (context, next) =>
+        {
+            if (String.Equals(context.Request.Method, "PUT", StringComparison.OrdinalIgnoreCase) &&
+                context.Request.ContentType?.Contains("json", StringComparison.OrdinalIgnoreCase) == true)
+                context.Request.EnableBuffering();
+
+            await next();
+        });
+
         // 注册中间件
 
         // 服务魔方内嵌静态资源（wwwroot），支持物理目录覆盖
@@ -373,6 +399,10 @@ public static class CubeService
 
             app.UseStaticFiles(new StaticFileOptions { FileProvider = fileProvider });
         }
+
+        // 前端皮肤：项目引用了三代前端皮肤包（NewLife.Cube.Vue / NewLife.Cube.React 等）时自动启用，
+        // 用户项目保持 AddCube + UseCube 不变，即可在设置页切换已引用的皮肤
+        var skinManager = CubeSkinService.RegisterSkins(app);
 
         // 如果，头像目录设置不为空，开启静态文件中间件
         if (!set.AvatarPath.IsNullOrWhiteSpace())
@@ -420,11 +450,21 @@ public static class CubeService
         // 设置默认路由。如果外部已经执行 UseRouting，则直接注册
         app.UseRouter(endpoints =>
         {
-            XTrace.WriteLine("注册魔方区域路由");
+            XTrace.WriteLine("Registering Cube area routes");
 
             endpoints.MapControllerRoute(
                 "CubeAreas",
                 "api/{area}/{controller=Index}/{action=Index}/{id?}");
+
+            // 未匹配的 /api 请求返回 404，避免被 SPA 回退（MapFallbackToFile）当成前端路由返回 index.html
+            endpoints.MapFallback("/api/{**path}", context =>
+            {
+                context.Response.StatusCode = 404;
+                return Task.CompletedTask;
+            });
+
+            // 前端皮肤 SPA 回退：接口路由优先，未匹配的非文件路径回退到当前皮肤的 index.html
+            CubeSkinService.MapFallback(endpoints, skinManager);
         });
 
         //ManageProvider2.EndpointRoute = (IEndpointRouteBuilder)app.Properties["__EndpointRouteBuilder"];
@@ -441,15 +481,15 @@ public static class CubeService
         var modules = moduleManager.LoadAll();
         if (modules.Count > 0)
         {
-            XTrace.WriteLine("启用功能插件[{0}]个", modules.Count);
+            XTrace.WriteLine("Enabled {0} feature plugins", modules.Count);
             foreach (var item in modules)
             {
-                XTrace.WriteLine("启用插件：{0}", item.Key);
+                XTrace.WriteLine("Enabling plugin: {0}", item.Key);
                 item.Value.Use(app, env);
             }
         }
 
-        XTrace.WriteLine("{0} End   初始化魔方 {0}", new String('=', 32));
+        XTrace.WriteLine("{0} End   initializing Cube {0}", new String('=', 32));
 
         Task.Factory.StartNew(() => ResolveStarWeb(provider), TaskCreationOptions.LongRunning);
 
@@ -457,7 +497,7 @@ public static class CubeService
         if (app is IHost web)
             Model.Host.RegisterExit(() =>
             {
-                XTrace.WriteLine("魔方优雅退出！");
+                XTrace.WriteLine("Cube exited gracefully.");
                 web.StopAsync().Wait();
             });
 

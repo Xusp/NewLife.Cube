@@ -4,13 +4,16 @@ using System.Reflection;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using NewLife.Cube.Entity;
+using NewLife.Cube.Models;
 using NewLife.Cube.Services;
 using NewLife.Log;
+using NewLife.Remoting;
 using NewLife.Serialization;
 using NewLife.Web;
 using XCode;
 using XCode.DataAccessLayer;
 using XCode.Membership;
+using NewLife;
 
 namespace NewLife.Cube.Areas.Admin.Controllers;
 
@@ -61,17 +64,16 @@ public class LovController : ControllerBaseX
     }
 
     /// <summary>查看单条定义</summary>
-    /// <param name="id">值集编码（LovCode），可为空（兼容 ?id= 传参）</param>
+    /// <param name="id">值集编码（LovCode）</param>
     /// <returns>行数据</returns>
     [EntityAuthorize(PermissionFlags.Detail)]
-    [HttpGet]
+    [HttpGet("/api/[area]/[controller]/{id}")]
     public ApiResponse<Object> Detail(String id)
     {
-        if (id.IsNullOrEmpty()) id = Request.Query["id"].ToString();
         if (id.IsNullOrEmpty()) throw new ArgumentNullException(nameof(id));
 
         var def = LovStore.FindDef(id);
-        if (def == null) throw new InvalidOperationException($"值集 {id} 不存在");
+        if (def == null) throw new InvalidOperationException(L.T("Value set [{0}] does not exist.", id));
 
         return new ApiResponse<Object> { Data = ToRow(def) };
     }
@@ -87,28 +89,35 @@ public class LovController : ControllerBaseX
         CheckCode(model);
 
         if (LovStore.FindDef(model.LovCode) != null)
-            throw new InvalidOperationException($"值集 {model.LovCode} 已存在");
+            throw new InvalidOperationException(L.T("Value set [{0}] already exists.", model.LovCode));
 
         LovStore.SaveDef(model);
 
-        return new ApiResponse<Object> { Code = 0, Message = "添加成功", Data = new { id = model.LovCode } };
+        return new ApiResponse<Object> { Code = 0, Message = L.T("Add succeeded!"), Data = new { id = model.LovCode } };
     }
 
-    /// <summary>更新手工定义。body.id 为原 LovCode，lovCode 变更时级联清理旧编码数据</summary>
-    /// <param name="body">定义 JSON（含 id=旧 LovCode）</param>
+    /// <summary>更新手工定义。主键为原 LovCode，lovCode 变更时级联清理旧编码数据</summary>
+    /// <param name="id">原 LovCode</param>
+    /// <param name="body">定义 JSON</param>
     /// <returns>响应，data.id=LovCode</returns>
     [EntityAuthorize(PermissionFlags.Update)]
-    [HttpPut("/api/[area]/[controller]")]
-    public ApiResponse<Object> Update([FromBody] JsonDocument body)
+    [HttpPut("/api/[area]/[controller]/{id}")]
+    public ApiResponse<Object> Update(String id, [FromBody] JsonDocument body)
     {
+        if (id.IsNullOrEmpty()) throw new ApiException(CubeCode.ParamError.ToInt(), L.T("Missing primary key."));
+
         var root = body.RootElement;
-        var oldCode = GetStr(root, "id");
+        // 路径与请求体都带主键时必须一致，避免"路径指向 A、内容改 B"
+        var bodyId = GetStr(root, "id");
+        if (!bodyId.IsNullOrEmpty() && !bodyId.EqualIgnoreCase(id))
+            throw new ApiException(CubeCode.ParamError.ToInt(), L.T("The primary key in the route does not match the one in the request body."));
+
+        var oldCode = id;
         var model = ParseDef(root);
         CheckCode(model);
 
-        if (oldCode.IsNullOrEmpty()) oldCode = model.LovCode;
         if (LovStore.FindDef(oldCode) == null)
-            throw new InvalidOperationException($"值集 {oldCode} 不存在");
+            throw new InvalidOperationException(L.T("Value set [{0}] does not exist.", oldCode));
 
         // 编码变更：级联清理旧编码数据，以新编码重建（明细需在配置页重新维护）
         if (!oldCode.EqualIgnoreCase(model.LovCode))
@@ -116,14 +125,14 @@ public class LovController : ControllerBaseX
 
         LovStore.SaveDef(model);
 
-        return new ApiResponse<Object> { Code = 0, Message = "更新成功", Data = new { id = model.LovCode } };
+        return new ApiResponse<Object> { Code = 0, Message = L.T("Save succeeded!"), Data = new { id = model.LovCode } };
     }
 
     /// <summary>删除手工定义（级联清理明细）</summary>
     /// <param name="id">值集编码</param>
     /// <returns>响应</returns>
     [EntityAuthorize(PermissionFlags.Delete)]
-    [HttpDelete("/api/[area]/[controller]")]
+    [HttpDelete("/api/[area]/[controller]/{id}")]
     public ApiResponse<Object> Delete(String id)
     {
         if (id.IsNullOrEmpty()) id = Request.Query["id"].ToString();
@@ -131,21 +140,21 @@ public class LovController : ControllerBaseX
 
         LovStore.DeleteDef(id);
 
-        return new ApiResponse<Object> { Code = 0, Message = "删除成功" };
+        return new ApiResponse<Object> { Code = 0, Message = L.T("Delete succeeded!") };
     }
 
-    /// <summary>批量删除选中数据。支持重复参数 id=a&amp;id=b、逗号分隔 id=a,b</summary>
-    /// <param name="id">值集编码集合</param>
+    /// <summary>批量删除选中数据。ids 传值集编码，支持逗号分隔或重复参数</summary>
+    /// <param name="ids">值集编码集合</param>
     /// <returns>响应</returns>
     [EntityAuthorize(PermissionFlags.Delete)]
-    [HttpDelete("/api/[area]/[controller]/DeleteSelect")]
-    public ApiResponse<String> DeleteSelect([FromQuery] String[] id)
+    [HttpDelete("/api/[area]/[controller]")]
+    public ApiResponse<String> DeleteSelect([FromQuery] String[] ids)
     {
-        if (id == null || id.Length == 0)
-            throw new InvalidOperationException("未指定要删除的数据！");
+        if (ids == null || ids.Length == 0)
+            throw new InvalidOperationException(L.T("No data specified for deletion."));
 
         var n = 0;
-        foreach (var item in id)
+        foreach (var item in ids)
         {
             var parts = item.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             foreach (var part in parts)
@@ -154,7 +163,7 @@ public class LovController : ControllerBaseX
             }
         }
 
-        return new ApiResponse<String> { Code = 0, Message = $"删除成功！共{n}条", Data = n.ToString() };
+        return new ApiResponse<String> { Code = 0, Message = L.T("Deleted {0} rows", n), Data = n.ToString() };
     }
     #endregion
 
@@ -164,7 +173,8 @@ public class LovController : ControllerBaseX
     /// <remarks>解析规则：手工定义（Parameter Lov.Def）优先 → 代码声明（Enum.* 反射 / List.* 读 [LovList] 描述符）。</remarks>
     /// <param name="lovCode">值集编码，逗号分隔</param>
     /// <returns>值集元数据集合</returns>
-    [EntityAuthorize(PermissionFlags.Detail)]
+    /// <remarks>值集为只读字典数据，任何登录用户可获取。</remarks>
+    [EntityAuthorize]
     [HttpGet]
     public Object Meta(String lovCode)
     {
@@ -222,7 +232,7 @@ public class LovController : ControllerBaseX
                 if (type == null) continue;
 
                 var options = LovRegistry.GetEnumOptions(type)
-                    .Select(e => (Object)new { e.Value, e.Label })
+                    .Select(e => (Object)new { e.Value, e.Label, e.Parent })
                     .ToList();
                 result.Add(new
                 {
@@ -253,7 +263,7 @@ public class LovController : ControllerBaseX
     /// <summary>列表数据代理。根据列表型值集配置代理请求外部接口（手工配置或 [LovList] 描述符）</summary>
     /// <param name="request">查询请求</param>
     /// <returns>代理查询结果</returns>
-    [EntityAuthorize(PermissionFlags.Detail)]
+    /// <remarks>用户 2026-10-25 裁定：值集列表数据登录即可读。目标地址由注册表配置、请求方无法指定，非 SSRF（t72 审查已核）。</remarks>
     [HttpPost]
     public async Task<Object> ListData([FromBody] LovListDataRequest request)
     {
@@ -262,14 +272,14 @@ public class LovController : ControllerBaseX
 
         var config = ResolveListConfig(request.LovCode);
         if (config == null)
-            throw new InvalidOperationException($"值集 {request.LovCode} 不存在或未配置列表数据源");
+            throw new InvalidOperationException(L.T("Value set [{0}] does not exist or has no list data source configured.", request.LovCode));
 
         // 内部实体值集（Entity.{Type}）：entity: 协议在控制器内直接查询实体工厂，不外发 HTTP，也不依赖 DI 代理
         if (!config.RequestUrl.IsNullOrEmpty() && config.RequestUrl.StartsWith("entity:", StringComparison.OrdinalIgnoreCase))
         {
             var fact = ResolveEntityFactoryByUrl(config.RequestUrl);
             if (fact == null)
-                throw new InvalidOperationException($"内部实体数据源 {config.RequestUrl["entity:".Length..].Trim()} 未注册");
+                throw new InvalidOperationException($"Internal entity data source {config.RequestUrl["entity:".Length..].Trim()} is not registered");
 
             // 行权（OSC-260926c2b8）：目标实体菜单 Detail 失败关闭 → 403（空数据不下发）
             if (!LovEntityGuard.CheckMenu(fact))
@@ -317,7 +327,7 @@ public class LovController : ControllerBaseX
         {
             var enumType = LovRegistry.FindEnumType(request.LovCode[5..]);
             if (enumType == null)
-                throw new InvalidOperationException($"值集 {request.LovCode} 不存在");
+                throw new InvalidOperationException($"Value set {request.LovCode} does not exist");
 
             var map = new Dictionary<String, String>(StringComparer.OrdinalIgnoreCase);
             foreach (var opt in LovRegistry.GetEnumOptions(enumType))
@@ -345,7 +355,7 @@ public class LovController : ControllerBaseX
         // [LovList] 声明式值集（List.*）：由 LovRegistry 反射直读配置，分页权威反查（行为不变）
         var desc = LovRegistry.FindList(request.LovCode);
         if (desc == null)
-            throw new InvalidOperationException($"值集 {request.LovCode} 不存在");
+            throw new InvalidOperationException($"Value set {request.LovCode} does not exist");
 
         LovListConfigModel config = desc.Config;
         String valueField = desc.ValueField;
@@ -433,7 +443,7 @@ public class LovController : ControllerBaseX
 
         if (url.StartsWith("entity:"))
         {
-            var fact = ResolveEntityFactoryByUrl(url) ?? throw new InvalidOperationException($"内部实体数据源 {url["entity:".Length..].Trim()} 未注册");
+            var fact = ResolveEntityFactoryByUrl(url) ?? throw new InvalidOperationException($"Internal entity data source {url["entity:".Length..].Trim()} is not registered");
 
             // 菜单 Detail 失败关闭（OSC-260926c2b8 审查 🟡1）：声明式值集把数据源配成 entity: 时同样受目标实体菜单约束
             if (!LovEntityGuard.CheckMenu(fact)) return ([], 0);
@@ -518,7 +528,7 @@ public class LovController : ControllerBaseX
         var responseBody = await httpResponse.Content.ReadAsStringAsync();
 
         if (!httpResponse.IsSuccessStatusCode)
-            throw new InvalidOperationException($"请求外部接口失败：{httpResponse.StatusCode} - {responseBody}");
+            throw new InvalidOperationException($"External API request failed: {httpResponse.StatusCode} - {responseBody}");
 
         using var doc = JsonDocument.Parse(responseBody);
         var root = doc.RootElement;
@@ -583,7 +593,7 @@ public class LovController : ControllerBaseX
         {
             var method = GetSearchWhereByKeys(fact.EntityType);
             if (method == null)
-                XTrace.WriteLine("entity: 值集 {0} 未找到 SearchWhereByKeys 方法，Q 过滤失效", fact.EntityType.Name);
+                XTrace.WriteLine("entity: value set {0} has no SearchWhereByKeys method; the Q filter is disabled", fact.EntityType.Name);
             else
             {
                 try
@@ -657,7 +667,7 @@ public class LovController : ControllerBaseX
         if (id.IsNullOrEmpty()) throw new ArgumentNullException(nameof(id));
 
         var def = LovStore.FindDef(id);
-        if (def == null) throw new InvalidOperationException($"值集 {id} 不存在");
+        if (def == null) throw new InvalidOperationException(L.T("Value set [{0}] does not exist.", id));
 
         var result = new Dictionary<String, Object?>
         {
@@ -750,7 +760,7 @@ public class LovController : ControllerBaseX
         if (id.IsNullOrEmpty()) throw new ArgumentNullException(nameof(id));
 
         var def = LovStore.FindDef(id);
-        if (def == null) throw new InvalidOperationException($"值集 {id} 不存在");
+        if (def == null) throw new InvalidOperationException(L.T("Value set [{0}] does not exist.", id));
 
         // ENUM 类型：保存枚举值（名值对）
         if (def.Type == "ENUM")
@@ -885,14 +895,14 @@ public class LovController : ControllerBaseX
     private static void CheckCode(LovDefModel def)
     {
         if (def.LovCode.IsNullOrEmpty())
-            throw new InvalidOperationException("值集编码不能为空");
+            throw new InvalidOperationException(L.T("Value set code is required."));
         if (def.Type != "ENUM" && def.Type != "LIST")
-            throw new InvalidOperationException($"值集类型 {def.Type} 无效，仅支持 ENUM/LIST");
+            throw new InvalidOperationException(L.T("Invalid value set type [{0}]; only ENUM and LIST are supported.", def.Type));
 
         var prefix = def.LovCode.Split('.')[0];
         var expectedPrefix = def.Type == "ENUM" ? "Enum" : "List";
         if (!prefix.EqualIgnoreCase(expectedPrefix))
-            throw new InvalidOperationException($"值集编码前缀与类型不匹配：LovCode 以 '{prefix}' 开头，但 Type 为 '{def.Type}'，{def.Type} 类型必须以 '{expectedPrefix}.' 开头");
+            throw new InvalidOperationException(L.T("Value set code prefix does not match the type: LovCode starts with '{0}' but Type is '{1}', which must start with '{2}.'", prefix, def.Type, expectedPrefix));
     }
 
     /// <summary>读取字符串属性（支持字符串/数字/布尔），不存在返回 null</summary>

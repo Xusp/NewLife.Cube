@@ -4,8 +4,9 @@
   import { getApi } from '$lib/api';
   import { getMenuPermission } from '$lib/stores/user';
   import FieldInput from '$lib/components/FieldInput.svelte';
-  import { FieldKind, Auth, type DataField, type PageResult } from '@newlifex/api-core';
-  import { toCamelCase } from '@newlifex/field-mapping';
+  import { Auth, type DataField } from '@newlifex/cube';
+  import { toCamelCase, resolveColumnWidth, resolveColumnAlign } from '@newlifex/cube';
+  import { validateRequiredFields } from '@newlifex/cube';
   import * as echarts from 'echarts';
 
   const exportOptions = [
@@ -33,6 +34,13 @@
   let detailFields: DataField[] = $state([]);
   let searchFields: DataField[] = $state([]);
 
+  /** 表格最小宽度：固定列按实际宽度，自适应列按 140px 估算，末尾预留操作列，窄屏横向滚动 */
+  const tableMinWidth = $derived(
+    listFields
+      .filter((field) => field.visible !== false)
+      .reduce((sum, field) => sum + (resolveColumnWidth(field) ?? 140), 0) + 230,
+  );
+
   // 数据
   let data: any[] = $state([]);
   let total = $state(0);
@@ -58,6 +66,7 @@
   let showDeleteConfirm = $state(false);
   let deleteTargetId = $state<number | null>(null);
   let formData: Record<string, any> = $state({});
+  let formError = $state('');
   let detailData: Record<string, any> = $state({});
   let isEdit = $state(false);
 
@@ -65,16 +74,13 @@
   async function loadFields() {
     const api = getApi();
     try {
-      const [listRes, editRes, detailRes, searchRes] = await Promise.all([
-        api.page.getFields(typePath, FieldKind.List),
-        api.page.getFields(typePath, FieldKind.Edit),
-        api.page.getFields(typePath, FieldKind.Detail),
-        api.page.getFields(typePath, FieldKind.Search),
-      ]);
-      listFields = listRes?.data ?? [];
-      editFields = editRes?.data ?? [];
-      detailFields = detailRes?.data ?? [];
-      searchFields = searchRes?.data ?? [];
+      // meta 一次返回全部视图字段；api-core 已把 v2 的字段表 + 视图差异展开为旧结构
+      const res = await api.page.getPage(typePath);
+      const meta = res?.data;
+      listFields = meta?.list ?? [];
+      editFields = meta?.editForm ?? [];
+      detailFields = meta?.detail ?? [];
+      searchFields = meta?.search ?? [];
     } catch { /* ignore */ }
   }
 
@@ -147,6 +153,7 @@
   // 创建
   function handleAdd() {
     formData = {};
+    formError = '';
     isEdit = false;
     showForm = true;
   }
@@ -156,6 +163,7 @@
     try {
       const res = await getApi().page.getDetail(typePath, id);
       formData = res?.data ? { ...res.data } : {};
+      formError = '';
       isEdit = true;
       showForm = true;
     } catch { /* ignore */ }
@@ -172,11 +180,18 @@
 
   // 保存
   async function handleSave() {
+    // 表单键为字段名的小驼峰形式，校验时按同一口径取值
+    const invalid = validateRequiredFields(editFields as any, formData, toCamelCase);
+    if (invalid.length) {
+      formError = invalid.map((e) => e.message).join('；');
+      return;
+    }
+    formError = '';
     try {
       if (isEdit) {
         await getApi().page.update(typePath, formData);
       } else {
-        await getApi().page.create(typePath, formData);
+        await getApi().page.add(typePath, formData);
       }
       showForm = false;
       await loadData();
@@ -192,7 +207,7 @@
   async function handleDelete() {
     if (deleteTargetId == null) return;
     try {
-      await getApi().page.delete(typePath, deleteTargetId);
+      await getApi().page.remove(typePath, deleteTargetId);
       showDeleteConfirm = false;
       deleteTargetId = null;
       await loadData();
@@ -301,16 +316,19 @@
 
 <!-- Table -->
 <div class="card p-0 overflow-auto">
-  <table class="w-full text-sm">
+  <table class="w-full text-sm" style="min-width: {tableMinWidth}px">
     <thead>
       <tr class="border-b" style="border-color: var(--border); background: var(--bg-secondary)">
         <th class="w-10 px-3 py-3">
           <input type="checkbox" checked={allSelected} onchange={toggleAll} />
         </th>
         {#each listFields as f}
-          <th class="px-3 py-3 text-left font-medium" style="color: var(--text-secondary)">{f.displayName || f.name}</th>
+          <th
+            class="px-3 py-3 font-medium"
+            style="color: var(--text-secondary); width: {resolveColumnWidth(f) ?? 'auto'}; text-align: {resolveColumnAlign(f)}"
+          >{f.displayName || f.name}</th>
         {/each}
-        <th class="px-3 py-3 text-left font-medium" style="color: var(--text-secondary)">操作</th>
+        <th class="px-3 py-3 text-left font-medium" style="color: var(--text-secondary); width: 180px">操作</th>
       </tr>
     </thead>
     <tbody>
@@ -325,7 +343,7 @@
               <input type="checkbox" checked={selectedIds.has(row.id)} onchange={() => toggleOne(row.id)} />
             </td>
             {#each listFields as f}
-              <td class="px-3 py-2.5">{getValue(row, f) ?? '-'}</td>
+              <td class="px-3 py-2.5" style="text-align: {resolveColumnAlign(f)}">{getValue(row, f) ?? '-'}</td>
             {/each}
             <td class="px-3 py-2.5">
               <div class="flex gap-2">
@@ -372,6 +390,9 @@
   <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onclick={(e) => { if (e.target === e.currentTarget) showForm = false; }}>
     <div class="card w-full max-w-lg max-h-[80vh] overflow-auto m-4">
       <h3 class="text-lg font-bold mb-4">{isEdit ? '编辑' : '新增'}</h3>
+      {#if formError}
+        <div role="alert" class="mb-3 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-600">{formError}</div>
+      {/if}
       <div class="space-y-4">
         {#each editFields as f}
           <div>

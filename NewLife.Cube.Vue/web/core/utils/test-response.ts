@@ -10,9 +10,9 @@ const mockResponse = {
   "data": [
     {
       "id": 190,
-      "name": "测试2",
-      "displayName": "测试2",
-      "mail": "测试2@qq.com",
+      "name": "test2",
+      "displayName": "test2",
+      "mail": "test2@qq.com",
       "enable": true
     }
   ],
@@ -27,20 +27,20 @@ const mockResponse = {
 };
 
 // 测试处理逻辑
-console.log('=== 测试API响应处理 ===');
+console.log('=== Test API response handling ===');
 
 const result = handleApiResponse(mockResponse, {
   showSuccessMessage: false,
   showErrorMessage: true
 });
 
-console.log('处理结果:', {
+console.log('Handled result:', {
   success: result.success,
   dataLength: Array.isArray(result.data) ? result.data.length : 'not array',
   hasPage: !!result.page,
   totalCount: result.page?.totalCount
 });
 
-console.log('预期结果: success=true, dataLength=1, hasPage=true, totalCount=189');
+console.log('Expected: success=true, dataLength=1, hasPage=true, totalCount=189');
 
 export { };

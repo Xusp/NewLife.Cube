@@ -18,23 +18,38 @@ namespace NewLife.Cube;
 public class EntityAuthorizeAttribute : Attribute, IAuthorizationFilter
 {
     #region 属性
-    /// <summary>授权项</summary>
+    /// <summary>授权项。多授权项时取第一个，用于菜单权限项展示</summary>
     public PermissionFlags Permission { get; }
+
+    /// <summary>授权项集合。多个授权项之间是“或”的关系；全部为 None 时表示只需登录</summary>
+    public PermissionFlags[] Permissions { get; } = [PermissionFlags.None];
     #endregion
 
     #region 构造
-    static EntityAuthorizeAttribute() => XTrace.WriteLine("注册过滤器：{0}", typeof(EntityAuthorizeAttribute).FullName);
+    static EntityAuthorizeAttribute() => XTrace.WriteLine("Registering filter: {0}", typeof(EntityAuthorizeAttribute).FullName);
 
-    /// <summary>实例化实体授权特性</summary>
+    /// <summary>实例化实体授权特性。只需登录，不校验具体权限位</summary>
     public EntityAuthorizeAttribute() { }
 
     /// <summary>实例化实体授权特性</summary>
     /// <param name="permission"></param>
     public EntityAuthorizeAttribute(PermissionFlags permission)
     {
-        if (permission <= PermissionFlags.None) throw new ArgumentNullException(nameof(permission));
+        // None 表示只需登录，All(-1) 为合法的全权限组合；仅拒绝未知负值
+        if (permission < PermissionFlags.None && permission != PermissionFlags.All) throw new ArgumentNullException(nameof(permission));
 
         Permission = permission;
+        Permissions = [permission];
+    }
+
+    /// <summary>实例化实体授权特性。多个授权项之间是“或”的关系</summary>
+    /// <param name="permissions"></param>
+    public EntityAuthorizeAttribute(params PermissionFlags[] permissions)
+    {
+        if (permissions == null || permissions.Length == 0) throw new ArgumentNullException(nameof(permissions));
+
+        Permissions = permissions;
+        Permission = permissions[0];
     }
     #endregion
 
@@ -106,18 +121,21 @@ public class EntityAuthorizeAttribute : Attribute, IAuthorizationFilter
         user = ManagerProviderHelper.TryLogin(prv, httpContext);
         if (user == null) return false;
 
-        // 判断权限
+        // 未指定权限位时，只需登录即可
+        if (Permissions.All(e => e == PermissionFlags.None)) return true;
+
+        // 判断权限（多个授权项之间是“或”的关系）
         if (menu != null)
         {
-            if (user is IUser user2) return user2.Has(menu, Permission); 
+            if (user is IUser user2) return user2.Has(menu, Permissions);
 
-            var msg = $"访问资源[{menu}]时无法验证用户[{user}]的权限";
-            LogProvider.Provider.WriteLog("访问", "拒绝", false, msg, ip: ctx.GetUserHost());
+            var msg = L.T("Unable to verify permission of user [{1}] when accessing resource [{0}].", menu, user);
+            LogProvider.Provider.WriteLog(L.T("Access"), L.T("Denied"), false, msg, ip: ctx.GetUserHost());
             DefaultSpan.Current?.AppendTag(msg);
         }
         else
         {
-            LogProvider.Provider.WriteLog("访问", "拒绝", false, "无法找到菜单", ip: ctx.GetUserHost());
+            LogProvider.Provider.WriteLog(L.T("Access"), L.T("Denied"), false, L.T("Menu not found"), ip: ctx.GetUserHost());
         }
 
         return false;
@@ -138,20 +156,20 @@ public class EntityAuthorizeAttribute : Attribute, IAuthorizationFilter
                 // 按失败原因输出差异化文案（F4）：显式标识无效 / 缺租户标识 / 非租户成员
                 var msg = filterContext.HttpContext.Items[ManagerProviderHelper.TenantCheckFailedReasonKey] as String switch
                 {
-                    "InvalidIdentifier" => $"用户[{failedUser}]携带的租户标识无效或不可用，请检查租户信息后重试",
-                    "MissingIdentifier" => $"用户[{failedUser}]未携带租户标识，无法确定访问租户，请携带租户信息后重试",
-                    _ => $"用户[{failedUser}]无权访问当前租户数据，请切换租户后重试",
+                    "InvalidIdentifier" => L.T("The tenant identifier carried by user [{0}] is invalid or unavailable. Check the tenant settings and try again.", failedUser),
+                    "MissingIdentifier" => L.T("User [{0}] did not carry a tenant identifier, so the tenant cannot be determined. Include the tenant information and try again.", failedUser),
+                    _ => L.T("User [{0}] is not allowed to access the data of the current tenant. Switch tenant and try again.", failedUser),
                 };
-                // 落库审计日志到 Log 表（与 ManagerProviderHelper.WriteTenantCompatDataLog 同口径：
-                // CreateLog + SaveAsync 一次失败事件一行审计记录，供管理后台审计日志查询；写入失败不影响主流程）
+                // 落库审计日志到 Log 表（CreateLog + SaveAsync：一次失败事件一行审计记录，
+                // 供管理后台审计日志查询；写入失败不影响主流程）
                 try
                 {
-                    var log = LogProvider.Provider.CreateLog("租户", "拒绝", false, msg, failedUserId, failedUser, filterContext.HttpContext.GetUserHost());
+                    var log = LogProvider.Provider.CreateLog(L.T("Tenant"), L.T("Denied"), false, msg, failedUserId, failedUser, filterContext.HttpContext.GetUserHost());
                     log?.SaveAsync();
                 }
                 catch (Exception ex)
                 {
-                    XTrace.WriteLine("租户拒绝审计日志写入失败：{0}", ex.Message);
+                    XTrace.WriteLine("Failed to write the tenant denial audit log: {0}", ex.Message);
                 }
                 filterContext.HttpContext.Response.StatusCode = 403;
                 filterContext.Result = new JsonResult(new { code = 403, message = msg });
@@ -159,7 +177,7 @@ public class EntityAuthorizeAttribute : Attribute, IAuthorizationFilter
             }
 
             filterContext.HttpContext.Response.StatusCode = 401;
-            filterContext.Result = new JsonResult(new { code = 401, message = "没有登录或登录超时！" });
+            filterContext.Result = new JsonResult(new { code = 401, message = L.T("Not signed in or the session has expired!") });
         }
         else
         {
@@ -181,8 +199,8 @@ public class EntityAuthorizeAttribute : Attribute, IAuthorizationFilter
         var ctx = filterContext.HttpContext;
 
         var res = $"[{ctrl.ControllerName}/{act.ActionName}]";
-        var msg = $"{user}访问资源 {res} 需要 {permission.GetDescription()} 权限";
-        LogProvider.Provider.WriteLog("访问", "拒绝", false, msg, ip: ctx.GetUserHost());
+        var msg = L.T("User {0} accessing resource {1} requires {2} permission.", user, res, L.T(permission.GetDescription()));
+        LogProvider.Provider.WriteLog(L.T("Access"), L.T("Denied"), false, msg, ip: ctx.GetUserHost());
         DefaultSpan.Current?.AppendTag(msg);
 
         filterContext.HttpContext.Response.StatusCode = 403;
@@ -228,7 +246,7 @@ public class EntityAuthorizeAttribute : Attribute, IAuthorizationFilter
             if (CreateMenu(type)) menu = mf.FindByFullName(fullName);
         }
 
-        if (menu == null) XTrace.WriteLine("设计错误！验证权限时无法找到[{0}/{1}]的菜单", type.FullName, act.ActionName);
+        if (menu == null) XTrace.WriteLine("Design error! Menu [{0}/{1}] was not found during permission validation.", type.FullName, act.ActionName);
 
         return menu;
     }
@@ -271,7 +289,7 @@ public class EntityAuthorizeAttribute : Attribute, IAuthorizationFilter
                 if (method.GetCustomAttribute<AllowAnonymousAttribute>() != null) continue;
 
                 var att = method.GetCustomAttribute<EntityAuthorizeAttribute>();
-                if (att != null && att.Permission > PermissionFlags.None)
+                if (att != null && att.Permissions.Length == 1 && att.Permission > PermissionFlags.None)
                 {
                     var dn = method.GetDisplayName();
                     var pmName = !dn.IsNullOrEmpty() ? dn : method.Name;

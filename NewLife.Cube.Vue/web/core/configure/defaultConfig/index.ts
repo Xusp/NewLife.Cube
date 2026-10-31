@@ -1,11 +1,16 @@
 import type { CubeFrontConfig } from '../types';
 import type { AxiosRequestConfig } from 'axios';
+import i18n from '../../i18n';
 
 export const defaultConfig: CubeFrontConfig = {
   base: {
-    title: '魔方系统',
+    get title() {
+      return i18n.global.t('topBar.brandFallback');
+    },
     logo: '/logo.png',
-    footer: '版权所有',
+    get footer() {
+      return i18n.global.t('topBar.footerFallback');
+    },
     env: 'dev',
   },
   menu: {
@@ -17,7 +22,7 @@ export const defaultConfig: CubeFrontConfig = {
         url: '/Cube/MenuTree',
       };
     },
-    // 字段映射对齐 @newlifex/api-core MenuItem（/Cube/MenuTree 返回结构，camelCase）
+    // 字段映射对齐 @newlifex/cube MenuItem（/Cube/MenuTree 返回结构，camelCase）
     isMenuTree: true,
     dataKey: 'data',
     idField: 'id',
@@ -85,7 +90,9 @@ export const defaultConfig: CubeFrontConfig = {
     // 后面会自动拼接重定向地址即可，后台需要配置SsoSafeDomains，跳转地址允许白名单，否则不能正常重定向
     oauthUrl: '/Sso/Login?name=NewLife&source=front-end&redirect_uri=',
     redirectUrl: '/login',
-    pageTitle: '登录',
+    get pageTitle() {
+      return i18n.global.t('login.tabLogin');
+    },
     background: '',
     logoutAxiosConfig: (): AxiosRequestConfig => {
       return {

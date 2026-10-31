@@ -5,7 +5,7 @@ import {
   parseWorkbenchConfig,
   serializeDashboardJson,
   type DashboardConfig,
-} from '@newlifex/api-core';
+} from '@newlifex/cube';
 import cubeApi from '@/api';
 import { WIDGET_SURFACE_KEY, type WidgetSurfaceContext } from '@/features/widget/context';
 

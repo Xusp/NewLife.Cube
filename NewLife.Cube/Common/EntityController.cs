@@ -1,6 +1,8 @@
-﻿using System.ComponentModel;
-using System.ComponentModel.DataAnnotations;
+using System.ComponentModel;
+using System.Reflection;
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using NewLife.Cube.Attributes;
 using NewLife.Cube.Extensions;
 using NewLife.Cube.ViewModels;
 using NewLife.Data;
@@ -8,6 +10,7 @@ using NewLife.Log;
 using NewLife.Reflection;
 using NewLife.Remoting;
 using NewLife.Web;
+using XCode;
 using XCode.Membership;
 
 namespace NewLife.Cube;
@@ -16,20 +19,27 @@ namespace NewLife.Cube;
 public partial class EntityController<TEntity, TModel>
 {
     #region 默认Action
-    /// <summary>删除数据</summary>
-    /// <param name="id"></param>
-    /// <returns></returns>
+    /// <summary>批量删除主键上限。超过时应改用条件删除</summary>
+    public const Int32 MaxBatchDelete = 100;
+
+    /// <summary>删除数据。主键在路径中</summary>
+    /// <param name="id">主键</param>
+    /// <returns>删除结果响应，失败时携带错误码与消息</returns>
     [EntityAuthorize(PermissionFlags.Delete)]
-    [DisplayName("删除{type}")]
-    [HttpDelete("/api/[area]/[controller]")]
-    public virtual ApiResponse<TEntity> Delete([Required] String id)
+    [DisplayName("Delete {type}")]
+    [HttpDelete("/api/[area]/[controller]/{id}")]
+    public virtual ApiResponse<TEntity> Delete(String id)
     {
-        var act = "删除";
+        if (id.IsNullOrEmpty()) throw new ApiException(Models.CubeCode.ParamError.ToInt(), L.T("Missing primary key."));
+
+        var act = L.T("Delete");
         var entity = FindData(id);
+        if (entity == null || (entity as IEntity).IsNullKey) throw new ApiException(ApiCode.NotFound.ToInt(), L.T("The requested data [{0}] does not exist.", id));
+
         try
         {
             act = ProcessDelete(entity);
-            return new ApiResponse<TEntity> { Code = 0, Message = $"{act}成功！", Data = entity };
+            return new ApiResponse<TEntity> { Code = 0, Message = L.T("{0} succeeded!", act), Data = entity };
         }
         catch (Exception ex)
         {
@@ -37,113 +47,62 @@ public partial class EntityController<TEntity, TModel>
         }
     }
 
-    /// <summary>批量启用。复用既有 EnableOrDisableSelect 逻辑（OnSetField + 日志 + 批量），供 SPA 启用徽标以 keys 传主键</summary>
-    /// <param name="keys">主键集合，逗号分隔</param>
-    /// <param name="reason">操作原因</param>
-    /// <returns></returns>
-    [EntityAuthorize(PermissionFlags.Update)]
-    [DisplayName("启用{type}")]
-    [HttpGet]
-    public virtual ApiResponse<TEntity> EnableSelect(String keys, String reason = null)
-    {
-        var count = EnableOrDisableSelect(true, reason);
-        if (count <= 0)
-            return new ApiResponse<TEntity> { Code = 500, Message = "未找到可启用的记录（keys 无效或无 Enable 字段）" };
-        return new ApiResponse<TEntity> { Code = 0, Message = $"共启用[{count}]个" };
-    }
-
-    /// <summary>批量禁用。复用既有 EnableOrDisableSelect 逻辑</summary>
-    /// <param name="keys">主键集合，逗号分隔</param>
-    /// <param name="reason">操作原因</param>
-    /// <returns></returns>
-    [EntityAuthorize(PermissionFlags.Update)]
-    [DisplayName("禁用{type}")]
-    [HttpGet]
-    public virtual ApiResponse<TEntity> DisableSelect(String keys, String reason = null)
-    {
-        var count = EnableOrDisableSelect(false, reason);
-        if (count <= 0)
-            return new ApiResponse<TEntity> { Code = 500, Message = "未找到可禁用的记录（keys 无效或无 Enable 字段）" };
-        return new ApiResponse<TEntity> { Code = 0, Message = $"共禁用[{count}]个" };
-    }
-
-    /// <summary>批量删除选中数据。前端 deleteSelect 调用，支持重复参数 id=1&amp;id=2、索引形式 id[0]=1&amp;id[1]=2、逗号分隔 id=1,2</summary>
-    /// <param name="id">主键集合。为空时返回参数错误</param>
-    /// <returns></returns>
+    /// <summary>批量或按条件删除。ids 传选中主键（逗号分隔或重复参数，最多 <see cref="MaxBatchDelete"/> 个）；未传 ids 时按当前搜索条件删除全部匹配行</summary>
+    /// <param name="ids">主键集合</param>
+    /// <returns>删除结果响应；Data 为受影响行数说明，失败时携带错误码与消息</returns>
     [EntityAuthorize(PermissionFlags.Delete)]
-    [DisplayName("批量删除{type}")]
-    [HttpDelete("/api/[area]/[controller]/DeleteSelect")]
-    public virtual ApiResponse<String> DeleteSelect([FromQuery] String[] id)
+    [DisplayName("Delete {type} in bulk")]
+    [HttpDelete("/api/[area]/[controller]")]
+    public virtual ApiResponse<String> DeleteAll([FromQuery] String[] ids = null)
     {
-        var act = "删除";
+        var act = L.T("Delete");
         try
         {
-            if (id == null || id.Length == 0)
-                throw new ApiException(Models.CubeCode.ParamError.ToInt(), "未指定要删除的数据！");
-
             var n = 0;
-            foreach (var item in id)
+            if (Request.Query.ContainsKey("ids"))
             {
-                // 兼容逗号分隔形式 id=1,2,3（String[] 绑定为单个元素时拆分）
-                var parts = item.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                foreach (var part in parts)
+                var keys = (ids ?? []).SelectMany(e => e.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)).ToArray();
+                if (keys.Length == 0) throw new ApiException(Models.CubeCode.ParamError.ToInt(), L.T("No data specified for deletion."));
+                if (keys.Length > MaxBatchDelete) throw new ApiException(Models.CubeCode.ParamError.ToInt(), L.T("Too many ids to delete at once. Use query conditions instead."));
+
+                foreach (var item in keys)
                 {
-                    var entity = FindData(part);
+                    var entity = FindData(item);
                     if (entity == null) continue;
 
                     ProcessDelete(entity);
                     n++;
                 }
             }
-
-            return new ApiResponse<String> { Code = 0, Message = $"{act}成功！共{n}条", Data = n.ToString() };
-        }
-        catch (Exception ex)
-        {
-            // DeleteSelect 返回 ApiResponse<String>，复用 BuildFailResponse 后做类型适配（保留错误码/消息/字段错误）
-            var fail = BuildFailResponse(ex, act, null);
-            return new ApiResponse<String> { Code = fail.Code, Message = fail.Message, Data = null, FieldErrors = fail.FieldErrors };
-        }
-    }
-
-    /// <summary>按当前搜索条件删除全部数据。至少需携带一个业务搜索条件，防止误删全表</summary>
-    /// <returns></returns>
-    [EntityAuthorize(PermissionFlags.Delete)]
-    [DisplayName("按条件删除{type}")]
-    [HttpDelete("/api/[area]/[controller]/DeleteAll")]
-    public virtual ApiResponse<String> DeleteAll()
-    {
-        var act = "删除";
-        try
-        {
-            var p = new Pager(WebHelper.Params);
-            // 排除分页系统参数后若无业务搜索条件，拒绝删除
-            var sys = new[] { "pageIndex", "pageSize", "sort", "desc" };
-            if (!p.Params.Keys.Any(e => !e.EqualIgnoreCase(sys)))
-                throw new ApiException(Models.CubeCode.ParamError.ToInt(), "未指定删除条件，拒绝删除全部数据！");
-
-            var list = SearchData(p).ToList();
-            var n = 0;
-            foreach (var entity in list)
+            else
             {
-                ProcessDelete(entity);
-                n++;
+                var p = new Pager(WebHelper.Params) { PageSize = 0 };// 删除全部匹配行，不受分页限制
+                // 排除分页系统参数后若无业务搜索条件，拒绝删除
+                var sys = new[] { "pageIndex", "pageSize", "sort", "desc", "ids" };
+                if (!p.Params.Keys.Any(e => !e.EqualIgnoreCase(sys)))
+                    throw new ApiException(Models.CubeCode.ParamError.ToInt(), L.T("No delete condition specified; refusing to delete all data."));
+
+                foreach (var entity in SearchData(p).ToList())
+                {
+                    ProcessDelete(entity);
+                    n++;
+                }
             }
 
-            return new ApiResponse<String> { Code = 0, Message = $"{act}成功！共{n}条", Data = n.ToString() };
+            return new ApiResponse<String> { Code = 0, Message = L.T("{0} succeeded! Total {1} rows", act, n), Data = n.ToString() };
         }
         catch (Exception ex)
         {
-            // DeleteAll 返回 ApiResponse<String>，复用 BuildFailResponse 后做类型适配（保留错误码/消息/字段错误）
+            // 返回 ApiResponse<String>，复用 BuildFailResponse 后做类型适配（保留错误码/消息/字段错误）
             var fail = BuildFailResponse(ex, act, null);
             return new ApiResponse<String> { Code = fail.Code, Message = fail.Message, Data = null, FieldErrors = fail.FieldErrors };
         }
     }
 
     /// <summary>添加数据</summary>
-    /// <param name="model"></param>
-    /// <returns></returns>
-    [DisplayName("添加{type}")]
+    /// <param name="model">提交的模型数据，字段与实体属性对应</param>
+    /// <returns>新增后的实体响应，校验失败时携带字段错误</returns>
+    [DisplayName("Add {type}")]
     [EntityAuthorize(PermissionFlags.Insert)]
     [HttpPost("/api/[area]/[controller]")]
     public virtual async Task<ApiResponse<TEntity>> Insert(TModel model)
@@ -162,26 +121,26 @@ public partial class EntityController<TEntity, TModel>
         }
         catch (Exception ex)
         {
-            return BuildFailResponse(ex, "添加", entity);
+            return BuildFailResponse(ex, L.T("Add"), entity);
         }
 
         return await ProcessInsert(entity);
     }
 
     /// <summary>添加数据</summary>
-    /// <param name="entity"></param>
-    /// <returns></returns>
+    /// <param name="entity">已通过校验、待写入数据库的实体</param>
+    /// <returns>新增结果响应</returns>
     [NonAction]
     protected virtual async Task<ApiResponse<TEntity>> ProcessInsert(TEntity entity)
     {
         // 检测避免乱用Add/id
         if (Factory.Unique.IsIdentity && entity[Factory.Unique.Name].ToInt() != 0)
-            throw new Exception("我们约定添加数据时路由id部分默认没有数据，以免模型绑定器错误识别！");
+            throw new Exception(L.T("Adding data must not include a route id."));
 
         try
         {
             if (!Valid(entity, DataObjectMethodType.Insert, true))
-                throw new Exception("验证失败");
+                throw new Exception(L.T("Validation failed."));
 
             // 基于 Model.xml 元数据的字段级校验（必填、长度等），提前发现问题返回明确错误
             // 子类可通过 override EnableFieldValidation => false 关闭；写请求携带 X-Cube-Field-Validation 头也可选择加入（OSC-260819e483 P1）
@@ -195,7 +154,7 @@ public partial class EntityController<TEntity, TModel>
                     return new ApiResponse<TEntity>
                     {
                         Code = Models.CubeCode.ParamError.ToInt(),
-                        Message = SysConfig.Develop ? ($"添加失败！{firstMsg}") : "添加失败！",
+                        Message = SysConfig.Develop ? $"{L.T("Add failed!")} {firstMsg}" : L.T("Add failed!"),
                         Data = entity,
                         FieldErrors = fieldErrors
                     };
@@ -212,59 +171,149 @@ public partial class EntityController<TEntity, TModel>
 
             if (LogOnChange) LogProvider.Provider.WriteLog("Insert", entity);
 
-            return new ApiResponse<TEntity> { Code = 0, Message = "添加成功！", Data = entity };
+            return new ApiResponse<TEntity> { Code = 0, Message = L.T("Add succeeded!"), Data = entity };
         }
         catch (Exception ex)
         {
             // 添加失败，ID清零，否则会显示保存按钮
             entity[Factory.Unique.Name] = 0;
 
-            return BuildFailResponse(ex, "添加", entity);
+            return BuildFailResponse(ex, L.T("Add"), entity);
         }
     }
 
-    /// <summary>更新数据</summary>
-    /// <param name="model"></param>
-    /// <returns></returns>
+    /// <summary>更新数据。主键在路径中</summary>
+    /// <remarks>
+    /// 语义为"部分更新"：先按主键查出库中记录，再只覆盖本次请求实际提交的字段。
+    /// 提交范围优先取请求 JSON 的顶层字段名，非 JSON 请求退回实体脏字段标记。
+    /// 未提交的字段保持数据库原值，显式提交 null 则清空该字段。
+    /// </remarks>
+    /// <param name="id">主键</param>
+    /// <param name="model">提交的模型</param>
+    /// <returns>更新后的实体响应；未提交字段保持原值</returns>
     [EntityAuthorize(PermissionFlags.Update)]
-    [DisplayName("更新{type}")]
-    [HttpPut("/api/[area]/[controller]")]
-    public virtual async Task<ApiResponse<TEntity>> Update(TModel model)
+    [DisplayName("Update {type}")]
+    [HttpPut("/api/[area]/[controller]/{id}")]
+    public virtual async Task<ApiResponse<TEntity>> Update(String id, TModel model)
     {
-        // 实例化实体对象，然后拷贝
-        if (model is TEntity entity) return await ProcessUpdate(entity);
+        if (id.IsNullOrEmpty()) throw new ApiException(Models.CubeCode.ParamError.ToInt(), L.T("Missing primary key."));
 
         var uk = Factory.Unique;
-        var key = model is IModel ext ? ext[uk.Name] : model.GetValue(uk.Name);
+        // 路径与请求体都带主键时必须一致，避免"路径指向 A、内容改 B"。
+        // 注意用属性反射取值：XCode 实体索引器只读扩展字典，属性赋过的值取不到
+        var pi = typeof(TModel).GetProperty(uk.Name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+        var current = ((pi != null && pi.CanRead ? pi.GetValue(model) : model.GetValue(uk.Name)) + "").Trim();
+        if (!current.IsNullOrEmpty() && current != "0" && current != id)
+            throw new ApiException(Models.CubeCode.ParamError.ToInt(), L.T("The primary key in the route does not match the one in the request body."));
 
-        // 先查出来，再拷贝。这里没有考虑脏数据的问题，有可能拷贝后并没有脏数据
-        entity = FindData(key);
+        var key = id.ChangeType(uk.Type);
+
+        // 先查出来，再按提交范围覆盖，避免"未提交字段被默认值清空"
+        var entity = FindData(key);
+        if (entity == null || (entity as IEntity).IsNullKey)
+            throw new XException("The requested data [{0}] does not exist.", key);
 
         try
         {
-            if (model is IModel src)
-                entity.CopyFrom(src, true, true);
+            // 优先用请求 JSON 的顶层字段名确定"提交范围"，能区分"未提交"与"显式 null"；
+            // 非 JSON 请求（如程序内调用）退回实体脏字段标记
+            var fields = await GetSubmittedFieldsAsync();
+            if (fields != null)
+                CopySubmitted(entity, model, fields, uk.Name);
+            else if (model is TEntity submitted)
+                MergeSubmitted(entity, submitted);
             else
                 entity.Copy(model, false, uk.Name);
         }
         catch (Exception ex)
         {
-            return BuildFailResponse(ex, "保存", entity);
+            return BuildFailResponse(ex, L.T("Save"), entity);
         }
 
         return await ProcessUpdate(entity);
     }
 
+    /// <summary>把提交实体中实际赋值过的字段覆盖到库中实体</summary>
+    /// <param name="target">库中实体</param>
+    /// <param name="source">请求绑定的实体</param>
+    protected void MergeSubmitted(TEntity target, TEntity source)
+    {
+        var uk = Factory.Unique;
+        var type = typeof(TEntity);
+        var dirtys = ((IEntity)source).Dirtys;
+        foreach (var fi in Factory.Fields)
+        {
+            if (fi.Name.EqualIgnoreCase(uk.Name)) continue;
+            if (!dirtys[fi.Name]) continue;
+
+            var pi = type.GetProperty(fi.Name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            if (pi == null || !pi.CanRead || !pi.CanWrite) continue;
+
+            pi.SetValue(target, pi.GetValue(source));
+        }
+    }
+
+    /// <summary>把模型中被请求 JSON 命中的字段覆盖到库中实体</summary>
+    /// <param name="target">库中实体</param>
+    /// <param name="model">请求绑定的模型</param>
+    /// <param name="fields">请求 JSON 的顶层字段名</param>
+    /// <param name="keyName">主键名，跳过不覆盖</param>
+    protected void CopySubmitted(TEntity target, TModel model, ISet<String> fields, String keyName)
+    {
+        var targetType = typeof(TEntity);
+        var modelType = model.GetType();
+        foreach (var fi in Factory.Fields)
+        {
+            if (fi.Name.EqualIgnoreCase(keyName)) continue;
+            if (!fields.Contains(fi.Name)) continue;
+
+            var tpi = targetType.GetProperty(fi.Name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            var spi = modelType.GetProperty(fi.Name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            if (tpi == null || !tpi.CanWrite || spi == null || !spi.CanRead) continue;
+
+            tpi.SetValue(target, spi.GetValue(model));
+        }
+    }
+
+    /// <summary>读取请求体中实际提交的顶层字段名。未启用缓冲或非 JSON 对象时返回 null</summary>
+    /// <returns>请求体中实际出现的顶层字段名集合；无法读取请求体时返回 null</returns>
+    protected async Task<ISet<String>> GetSubmittedFieldsAsync()
+    {
+        var body = Request.Body;
+        if (body == null || !body.CanSeek) return null;
+
+        var position = body.Position;
+        try
+        {
+            body.Position = 0;
+            using var doc = await JsonDocument.ParseAsync(body);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return null;
+
+            var set = new HashSet<String>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in doc.RootElement.EnumerateObject()) set.Add(item.Name);
+
+            return set;
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            body.Position = position;
+        }
+    }
+
     /// <summary>更新数据</summary>
-    /// <param name="entity"></param>
-    /// <returns></returns>
+    /// <param name="entity">已完成字段合并、待更新的实体</param>
+    /// <returns>更新结果响应</returns>
     [NonAction]
     protected virtual async Task<ApiResponse<TEntity>> ProcessUpdate(TEntity entity)
     {
         try
         {
             if (!Valid(entity, DataObjectMethodType.Update, true))
-                throw new Exception("验证失败");
+                throw new Exception(L.T("Validation failed."));
 
             // 基于 Model.xml 元数据的字段级校验（必填、长度等），提前发现问题返回明确错误
             // 子类可通过 override EnableFieldValidation => false 关闭；写请求携带 X-Cube-Field-Validation 头也可选择加入（OSC-260819e483 P1）
@@ -278,7 +327,7 @@ public partial class EntityController<TEntity, TModel>
                     return new ApiResponse<TEntity>
                     {
                         Code = Models.CubeCode.ParamError.ToInt(),
-                        Message = SysConfig.Develop ? ($"保存失败！{firstMsg}") : "保存失败！",
+                        Message = SysConfig.Develop ? $"{L.T("Save failed!")} {firstMsg}" : L.T("Save failed!"),
                         Data = null,
                         FieldErrors = fieldErrors
                     };
@@ -291,14 +340,14 @@ public partial class EntityController<TEntity, TModel>
 
             OnUpdate(entity);
 
-            return new ApiResponse<TEntity> { Code = 0, Message = "保存成功！", Data = entity };
+            return new ApiResponse<TEntity> { Code = 0, Message = L.T("Save succeeded!"), Data = entity };
         }
         catch (Exception ex)
         {
             // 保留 ModelState 以兼容 MVC 视图场景
             ModelState.AddModelError((ex as ArgumentException)?.ParamName ?? "", ex.Message);
 
-            return BuildFailResponse(ex, "保存", null);
+            return BuildFailResponse(ex, L.T("Save"), null);
         }
     }
     #endregion
@@ -315,16 +364,6 @@ public partial class EntityController<TEntity, TModel>
                 req.Headers.TryGetValue("X-Cube-Field-Validation", out var vs) &&
                 vs.ToString().EqualIgnoreCase("1", "true", "yes");
         }
-    }
-
-    /// <summary>根据字段名查找实体元数据中的 DisplayName（中文显示名）</summary>
-    /// <param name="fieldName">字段名</param>
-    /// <returns>DisplayName，找不到时返回原字段名</returns>
-    private static String GetFieldDisplayName(String fieldName)
-    {
-        if (fieldName.IsNullOrEmpty()) return fieldName;
-        var fi = Factory.AllFields.FirstOrDefault(e => e.Name.EqualIgnoreCase(fieldName));
-        return fi?.DisplayName ?? fieldName;
     }
 
     /// <summary>基于实体字段元数据（Model.xml）校验必填、长度等约束，返回字段级错误列表</summary>
@@ -373,7 +412,7 @@ public partial class EntityController<TEntity, TModel>
                     errors.Add(new FieldError
                     {
                         Field = df.Name,
-                        Message = $"{displayName}不可以为空！"
+                        Message = L.T("{0} is required.", displayName)
                     });
                     continue; // 必填不通过则跳过后续长度检查
                 }
@@ -385,99 +424,34 @@ public partial class EntityController<TEntity, TModel>
                 errors.Add(new FieldError
                 {
                     Field = df.Name,
-                    Message = $"{displayName}长度不能超过{df.Length}个字符！"
+                    Message = L.T("{0} must not exceed {1} characters.", displayName, df.Length)
                 });
             }
         }
 
         return errors.Count > 0 ? errors : null;
     }
-
-    /// <summary>从异常链中提取字段级验证错误，自动查找 DisplayName 增强消息可读性</summary>
-    /// <param name="ex">异常对象</param>
-    /// <returns>字段错误列表，无字段信息时返回null</returns>
-    private static List<FieldError> BuildFieldErrors(Exception ex)
-    {
-        if (ex == null) return null;
-
-        var list = new List<FieldError>();
-        var seen = new HashSet<String>(StringComparer.OrdinalIgnoreCase);
-
-        // 遍历异常链，收集所有带字段名的参数异常
-        var current = ex;
-        while (current != null)
-        {
-            if (current is ArgumentException ae && !ae.ParamName.IsNullOrEmpty())
-            {
-                // 去重：同一个字段只保留第一条错误
-                if (seen.Add(ae.ParamName))
-                {
-                    // 查找 DisplayName，如果消息中未包含中文名则补充
-                    var displayName = GetFieldDisplayName(ae.ParamName);
-                    var msg = ae.Message;
-                    if (displayName != ae.ParamName && !msg.Contains(displayName))
-                        msg = $"{displayName}{msg}";
-
-                    list.Add(new FieldError { Field = ae.ParamName, Message = msg });
-                }
-            }
-            else if (current is AggregateException agg)
-            {
-                foreach (var inner in agg.InnerExceptions)
-                {
-                    var innerErrors = BuildFieldErrors(inner);
-                    if (innerErrors != null) list.AddRange(innerErrors);
-                }
-            }
-            current = current.InnerException;
-        }
-        return list.Count > 0 ? list : null;
-    }
-
-    /// <summary>构建失败响应，自动提取字段级错误</summary>
-    /// <param name="ex">异常对象</param>
-    /// <param name="action">操作名称（添加/保存/删除）</param>
-    /// <param name="entity">实体对象</param>
-    /// <returns></returns>
-    private ApiResponse<TEntity> BuildFailResponse(Exception ex, String action, TEntity entity)
-    {
-        DefaultSpan.Current?.SetError(ex);
-
-        var err = ex.GetTrue().Message;
-        WriteLog(action, false, err);
-
-        var fieldErrors = BuildFieldErrors(ex);
-
-        // 如果有字段级错误，使用第一条作为主消息提示
-        if (fieldErrors != null && fieldErrors.Count > 0)
-            err = SysConfig.Develop ? ($"{action}失败！{fieldErrors[0].Message}") : $"{action}失败！";
-        else
-            err = SysConfig.Develop ? ($"{action}失败！{err}") : $"{action}失败！";
-
-        var code = ex is ApiException ae ? ae.Code : 500;
-        return new ApiResponse<TEntity>
-        {
-            Code = code,
-            Message = err,
-            Data = entity,
-            FieldErrors = fieldErrors
-        };
-    }
     #endregion
 
     #region 导入Excel/Csv/Json/Zip
-    /// <summary>导入文件（Excel/Csv/Json/Zip），然后批量写入数据库。经类级路由 api/[area]/[controller]/[action] 暴露为 POST /api/{area}/{controller}/ImportFile</summary>
+    /// <summary>导入文件（Excel/Csv/Json/Zip），然后批量写入数据库。路由为 POST /api/{area}/{controller}/import</summary>
     /// <param name="file">上传的 Excel/Csv/Json/Zip 文件</param>
     /// <returns>统一 Json 响应，message 含导入行数</returns>
     /// <remarks>依据文件扩展名分发到 ImportExcel/ImportCsv/ImportJson/ImportZip；导入失败时返回 code!=0 的业务错误</remarks>
-    [HttpPost]
+    [HttpPost("/api/[area]/[controller]/import")]
     [EntityAuthorize(PermissionFlags.Insert)]
-    [DisplayName("导入Excel/Csv/Json/Zip")]
-    public virtual IActionResult ImportFile(IFormFile file)
+    [DisplayName("Import Excel/Csv/Json/Zip")]
+    [Idempotent]
+    public virtual IActionResult Import(IFormFile file)
     {
-        if (file == null || file.Length <= 0) throw new ArgumentNullException(nameof(file), "未上传文件");
+        if (file == null || file.Length <= 0) throw new ArgumentNullException(nameof(file), L.T("No file was uploaded."));
 
-        WriteLog(nameof(ImportFile), true, $"开始导入文件[{file.FileName}]，大小[{file.Length:n0}]字节，类型[{file.ContentType}]");
+        // 体积上限：防止超大文件导入耗尽内存（0 表示不限制）
+        var maxMb = CubeSetting.Current.UploadMaxSize;
+        if (maxMb > 0 && file.Length > maxMb * 1024L * 1024L)
+            return Json(Models.CubeCode.ParamError.ToInt(), L.T("The file size must not exceed {0} MB.", maxMb));
+
+        WriteLog(nameof(Import), true, L.T("Start importing file [{0}], size [{1:n0}] bytes, type [{2}].", file.FileName, file.Length, file.ContentType));
 
         var factory = Factory;
         var page = GetCachePager();
@@ -490,10 +464,10 @@ public partial class EntityController<TEntity, TModel>
             ".csv" => ImportCsv(name, stream, factory, page),
             ".json" => ImportJson(name, stream, factory, page),
             ".zip" => ImportZip(name, stream, factory, page),
-            _ => throw new NotSupportedException($"不支持的导入文件类型[{ext}]"),
+            _ => throw new NotSupportedException(L.T("Unsupported import file type [{0}].", ext)),
         };
-        var msg = $"导入[{name}] 共{rs}行";
-        WriteLog(nameof(ImportFile), true, msg);
+        var msg = L.T("Imported [{0}], {1} rows.", name, rs);
+        WriteLog(nameof(Import), true, msg);
 
         return Json(0, msg);
     }

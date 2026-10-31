@@ -21,8 +21,8 @@ public class AILogSummaryJob : CubeJobBase
 
     #region 构造
     /// <summary>实例化</summary>
-    /// <param name="ai"></param>
-    /// <param name="tracer"></param>
+    /// <param name="ai">AI 服务，用于生成日志摘要</param>
+    /// <param name="tracer">链路追踪器</param>
     public AILogSummaryJob(IAIService ai, ITracer tracer)
     {
         _ai = ai;
@@ -32,14 +32,14 @@ public class AILogSummaryJob : CubeJobBase
 
     #region 方法
     /// <summary>执行</summary>
-    /// <param name="argument"></param>
-    /// <returns></returns>
+    /// <param name="argument">作业参数，当前未使用</param>
+    /// <returns>执行结果描述，写入作业日志</returns>
     public override async Task<String> Execute(String argument)
     {
         using var span = _tracer?.NewSpan(nameof(AILogSummaryJob));
 
         var set = CubeSetting.Current;
-        if (!set.AISwitch) return "AI 未启用，跳过";
+        if (!set.AISwitch) return L.T("AI is not enabled; skipped");
 
         // 查询过去 24h 的日志（取最近 50 条）
         var now = DateTime.Now;
@@ -48,7 +48,7 @@ public class AILogSummaryJob : CubeJobBase
             XCode.Membership.Log._.CreateTime >= start & XCode.Membership.Log._.CreateTime <= now,
             XCode.Membership.Log._.ID.Desc(), null, 0, 50);
         var count = logs.Count;
-        if (count == 0) return "过去 24 小时无日志";
+        if (count == 0) return L.T("No logs in the last 24 hours");
 
         // 构建日志摘要 JSON
         var logItems = logs.Select(e => new
@@ -61,12 +61,12 @@ public class AILogSummaryJob : CubeJobBase
         var logsJson = logItems.ToJson();
 
         // CronJob 保留深度推理，使用 ChatAsync 而非 AnalyzeLogsAsync
-        var prompt = @"你是系统运维专家。请分析以下错误日志，用中文给出：
-1. 错误类型归类（按频率排序）
-2. 最可能的根因
-3. 建议的排查步骤
+        var prompt = L.T(@"You are a system operations expert. Analyze the following error logs and report:
+1. Error categories, ordered by frequency
+2. The most likely root cause
+3. Recommended troubleshooting steps
 
-直接输出分析报告，不要加无关解释。";
+Output the analysis report directly without extra explanation.");
         var result = await _ai.ChatAsync(prompt, logsJson);
 
         // 推送站内信通知
@@ -74,16 +74,16 @@ public class AILogSummaryJob : CubeJobBase
         {
             Action = "AI_LogSummary",
             Channel = "InApp",
-            Title = $"日志日报 {now:yyyy-MM-dd}",
+            Title = L.T("Daily log report {0}", now.ToString("yyyy-MM-dd")),
             Content = result,
             Success = true,
-            Result = $"分析 {count} 条日志",
+            Result = L.T("Analyzed {0} log entries", count),
         };
         record.Insert();
 
         span?.AppendTag(result);
 
-        return $"分析 {count} 条日志完成";
+        return L.T("Analyzed {0} log entries", count);
     }
     #endregion
 }

@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue';
 import { Message, Modal } from '@arco-design/web-vue';
-import { ApiError } from '@newlifex/api-core';
+import { ApiError } from '@newlifex/cube';
 import cubeApi from '@/api';
 import { isEnableField, isTruthy } from '@/core/utils/fieldBadge';
 import { reloadWatchFields, shouldReloadAfterPatch, shouldReloadAfterWrite } from '@/core/utils/patchReload';

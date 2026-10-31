@@ -24,7 +24,7 @@ public static class WorkflowHost
         if (Interlocked.Exchange(ref _inited, 1) != 0) return;
 
         EntityInterceptors.Global.Add(new WorkflowWriteInterceptor());
-        XTrace.WriteLine("启用工作流写锁拦截器[WorkflowWriteInterceptor]");
+        XTrace.WriteLine("Enabling workflow write-lock interceptor [WorkflowWriteInterceptor]");
 
         // 确保 Workflow 库建表/加列（Title/Summary 等）；Full 可 ALTER，无需删库
         // 注意：XCode 的建表检查只在查询/计数路径触发，Insert 路径不触发；
@@ -42,7 +42,7 @@ public static class WorkflowHost
         }
         catch (Exception ex)
         {
-            XTrace.WriteLine("Workflow 库初始化：{0}", ex.Message);
+            XTrace.WriteLine("Workflow store initialization: {0}", ex.Message);
         }
 
         if (!ensureMenus) return;

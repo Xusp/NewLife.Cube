@@ -1,16 +1,17 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { Router, ActivatedRoute } from '@angular/router';
 import { NzCardModule } from 'ng-zorro-antd/card';
 import { NzFormModule } from 'ng-zorro-antd/form';
 import { NzInputModule } from 'ng-zorro-antd/input';
 import { NzButtonModule } from 'ng-zorro-antd/button';
 import { NzDividerModule } from 'ng-zorro-antd/divider';
 import { NzMessageService } from 'ng-zorro-antd/message';
-import type { OAuthProvider } from '@newlifex/api-core';
+import type { OAuthProvider } from '@newlifex/cube';
 import { ApiService } from '../../services/api.service';
 import { UserService } from '../../services/user.service';
+import { resolveRegisterModes, resolveRegisterTenant } from '../../utils/register';
 
 @Component({
   selector: 'app-login',
@@ -43,6 +44,17 @@ import { UserService } from '../../services/user.service';
             }
           </div>
         }
+        @if (forgotEnabled) {
+          <div style="text-align: center; margin-top: 8px;">
+            <button nz-button nzType="link" (click)="goForgotPassword()">忘记密码？</button>
+          </div>
+        }
+        @if (registerEnabled) {
+          <div style="text-align: center; margin-top: 16px; color: rgba(0, 0, 0, 0.45);">
+            还没有账号？
+            <button nz-button nzType="link" (click)="goRegister()">立即注册</button>
+          </div>
+        }
       </nz-card>
     </div>
   `,
@@ -52,17 +64,31 @@ export class LoginComponent implements OnInit {
   password = '';
   loading = false;
   oauthProviders: OAuthProvider[] = [];
+  /** 后端是否开放注册 */
+  registerEnabled = false;
+  /** 是否展示「忘记密码」入口：重置密码依赖短信/邮件通道，两个通道都关时无意义 */
+  forgotEnabled = false;
+  /** 租户查询参数 */
+  private tenant: { appId?: string; tenantCode?: string } = {};
 
   constructor(
     private api: ApiService,
     private userService: UserService,
     private router: Router,
+    private route: ActivatedRoute,
     private message: NzMessageService,
   ) {}
 
   async ngOnInit() {
-    const res = await this.api.user.getLoginConfig();
-    if (res.data?.providers) this.oauthProviders = res.data.providers;
+    this.tenant = resolveRegisterTenant(this.route.snapshot.queryParams as Record<string, unknown>);
+    try {
+      const res = await this.api.user.getLoginConfig(this.tenant.tenantCode);
+      if (res.data?.oauth) this.oauthProviders = res.data.oauth;
+      this.registerEnabled = resolveRegisterModes(res.data?.register).length > 0;
+      this.forgotEnabled = res.data?.login?.sms === true || res.data?.login?.mail === true;
+    } catch {
+      // 登录页配置加载失败不阻塞密码登录
+    }
   }
 
   async handleLogin() {
@@ -85,6 +111,22 @@ export class LoginComponent implements OnInit {
   }
 
   oauthLogin(name: string) {
-    window.location.href = `/Sso/LoginExternal?provider=${name}`;
+    // 非 source=front-end 流程：后端写登录 Cookie 后回跳，保留原 redirect 参数
+    const redirect = this.route.snapshot.queryParamMap.get('redirect') || '/home';
+    window.location.href = `/Sso/Login/${encodeURIComponent(name)}?r=${encodeURIComponent(redirect)}`;
+  }
+
+  /** 进入注册页，保留租户查询参数 */
+  goForgotPassword() {
+    this.router.navigate(['/forgot-password']);
+  }
+
+  goRegister() {
+    const queryParams: Record<string, string> = {};
+    if (this.tenant.appId) queryParams['appId'] = this.tenant.appId;
+    if (this.tenant.tenantCode) queryParams['tenant'] = this.tenant.tenantCode;
+    this.router.navigate(['/register'], {
+      queryParams: Object.keys(queryParams).length > 0 ? queryParams : undefined,
+    });
   }
 }

@@ -1,6 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
 import { getApi } from '$lib/api';
-import type { MenuItem } from '@newlifex/api-core';
+import type { MenuItem } from '@newlifex/cube';
+import { getMenuPermission as resolveMenuPermission } from '@newlifex/cube';
 
 interface UserInfo {
   displayName?: string;
@@ -14,29 +15,17 @@ export const menus = writable<MenuItem[]>([]);
 export const isLoggedIn = derived(user, ($u) => !!$u);
 export const displayName = derived(user, ($u) => $u?.displayName || $u?.name || '');
 
-/** 递归查找菜单树中 URL 匹配的节点 */
-function findMenu(items: MenuItem[], path: string): MenuItem | undefined {
-  for (const m of items) {
-    if (m.url && path.toLowerCase().endsWith(m.url.toLowerCase())) return m;
-    if (m.children?.length) {
-      const found = findMenu(m.children, path);
-      if (found) return found;
-    }
-  }
-  return undefined;
-}
-
 /** 获取指定路径的菜单权限 */
 export function getMenuPermission(path: string): Record<string, string> {
-  const item = findMenu(get(menus), path);
-  return item?.permissions ?? {};
+  return resolveMenuPermission(get(menus), path);
 }
 
 export async function login(username: string, password: string): Promise<boolean> {
   try {
-    const res = await getApi().user.login(username, password);
-    if (res?.data) {
-      user.set(res.data);
+    const res = await getApi().user.login({ username, password });
+    if (res?.data?.accessToken) {
+      // 登录结果只含令牌，用户资料由 /Auth/Info 获取
+      await fetchUserInfo();
       return true;
     }
     return false;

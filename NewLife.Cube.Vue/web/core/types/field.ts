@@ -1,7 +1,7 @@
 /**
  * 字段映射共享类型定义（全项目唯一契约来源）
  *
- * 后端 GetPage 下发的字段元数据（NewLife.Cube `DataField`）经前端归一为 `FieldMeta`，
+ * 后端 meta 下发的字段元数据（NewLife.Cube `DataField`）经前端归一为 `FieldMeta`，
  * 由 `web/core/utils/fieldControl.ts` 统一解析为控件类型，驱动
  * 列表渲染 / 动态搜索 / 表单编辑 三处视图。
  *
@@ -29,8 +29,10 @@ export type ControlType =
   | 'email' // 邮箱（带校验）
   | 'tel' // 手机（带校验）
   | 'url' // 网址（带校验）
+  | 'password' // 密码（遮蔽显示，ItemType=password）
   | 'readonly' // 只读文本（Guid 等）
-  | 'select'; // 枚举 / 字典下拉（后端下发 dataSource）
+  | 'select' // 枚举 / 字典下拉（后端下发 dataSource）
+  | 'area'; // 地区级联（ItemType=area1~4）
 
 /** 动态搜索控件类型（搜索区子集） */
 export type SearchControlType =
@@ -42,7 +44,8 @@ export type SearchControlType =
   | 'lov' // 值集单选
   | 'lovMulti' // 值集多选
   | 'switch' // 布尔（是 / 否）
-  | 'fileExists'; // 附件存在性（有 / 无）
+  | 'fileExists' // 附件存在性（有 / 无）
+  | 'area'; // 地区级联（ItemType=area1~4）
 
 /** 列表单元格渲染类型 */
 export type ListControlType =
@@ -92,6 +95,42 @@ export interface FieldMeta {
   readOnly?: boolean;
   /** 描述（用作表单占位提示） */
   description?: string;
+  /** 字段分类（表单分组） */
+  category?: string;
+  /** 是否显示（列表列） */
+  visible?: boolean;
+  /** 表头文字。优先于 displayName */
+  header?: string;
+  /** 表头提示文字 */
+  headerTitle?: string;
+  /** 单元格链接。支持 {字段名} 与 {page:参数名} 占位符 */
+  url?: string;
+  /** 链接目标。_blank / _self */
+  target?: string;
+  /** 单元格文字。支持 {字段名} 与 {page:参数名} 占位符 */
+  text?: string;
+  /** 单元格提示文字。支持占位符 */
+  title?: string;
+  /** 数据动作。action 表示点击链接走 AJAX 请求后刷新列表 */
+  dataAction?: string;
+  /** 取值字段。列表单元格优先取该字段值，为空时回退本字段 */
+  valueField?: string;
+  /** 文本对齐。后端 TextAligns 枚举值（1/2/3）或 left/center/right */
+  textAlign?: string | number;
+  /** 列宽。preset 覆盖，数字为像素，'auto' 为自适应 */
+  width?: number | 'auto';
+  /** 固定列。preset 覆盖 */
+  fixed?: 'left' | 'right';
+  /** 是否隐藏。preset 覆盖 */
+  hidden?: boolean;
+  /** 行/模型级显示条件。preset 覆盖 */
+  visibleWhen?: (model: Record<string, unknown>) => boolean;
+  /** 行/模型级必填条件。preset 覆盖 */
+  requiredWhen?: (model: Record<string, unknown>) => boolean;
+  /** 最大宽度。超长文本截断到该字符数 */
+  maxWidth?: number;
+  /** 单元格样式类 */
+  class?: string;
   /** 值集编码（枚举 / singleSelect / multipleSelect 由后端静态构造下发，前端绝不硬编码） */
   lovCode?: string;
   /** 是否多选（multipleSelect 为 true；亦可由前端在映射时推导） */
@@ -103,6 +142,23 @@ export interface FieldMeta {
    * 与 lovCode 二选一：有 lovCode 走 LOV 远程拉取；否则用本地 dataSource 渲染下拉。
    */
   dataSource?: Record<string, string>;
+  /**
+   * 级联父字段名（后端对带 [Parent] 的枚举子字典下发，如 OrderType → "Section"）。
+   * 有值时表单渲染 LovSelect 并把同级该字段的当前值作为 :parent 传入，实现"父变过滤子"。
+   */
+  parentField?: string;
+  /** 渲染器名（对应控制器 View/ItemView/GroupView） */
+  view?: string;
+  /** 扩展属性，核心不解释 */
+  props?: Record<string, unknown>;
+  /** 是否非实体列 */
+  virtual?: boolean;
+  /** 搜索项类型 */
+  kind?: 'keyword' | 'range';
+  /** 区间结束参数名（kind=range） */
+  end?: string;
+  /** 区间对应的实体字段名（kind=range） */
+  field?: string;
 }
 
 /** 搜索字段（列表搜索区消费，继承 FieldMeta 并附带解析后的搜索控件类型） */

@@ -94,7 +94,7 @@ public static class TreeDescendantExpand
             }
             catch (Exception ex)
             {
-                XTrace.WriteLine("[TreeExpand] 取子失败：{0}", ex.Message);
+                XTrace.WriteLine("[TreeExpand] Failed to load children: {0}", ex.Message);
                 children = [];
             }
 
@@ -221,7 +221,7 @@ public static class TreeDescendantExpand
             }
             catch (Exception ex)
             {
-                XTrace.WriteLine("[TreeLazy] 子级探测失败：{0}", ex.Message);
+                XTrace.WriteLine("[TreeLazy] Child probe failed: {0}", ex.Message);
             }
         }
 

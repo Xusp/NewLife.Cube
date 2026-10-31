@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NewLife.Cube.Extensions;
 using NewLife.Cube.ViewModels;
+using NewLife.Log;
 using NewLife.Reflection;
 using NewLife.Web;
 using XCode.Membership;
@@ -63,28 +64,64 @@ public abstract class ObjectController<TObject> : ControllerBaseX
         return obj;
     }
 
-    /// <summary>
-    /// 获取字段
-    /// </summary>
-    /// <param name="kind"></param>
+    /// <summary>获取单对象页面的元数据。entity + setting + form 自描述字段数组</summary>
+    /// <remarks>单对象页（配置页、设置页）只有编辑表单，因此只返回 setting 与 form；需要匿名访问时在子类重写并标注 <see cref="AllowAnonymousAttribute"/></remarks>
     /// <returns></returns>
-    [AllowAnonymous]
-    [HttpGet]
-    public virtual IList<DataField> GetFields(ViewKinds kind)
+    [EntityAuthorize]
+    [HttpGet("/api/[area]/[controller]/meta")]
+    public virtual ApiResponse<Object> Meta()
     {
-        var list = GetMembers(Value?.GetType());
-        //var dic = list
-        //.GroupBy(e => e.Category + "")
-        //.ToDictionary(e => e.Key, e => e.ToList());
-
-        // 为 SPA 物化数据源字典（布尔/枚举/DataSource 委托），前端无需反复请求；PrepareForApi 幂等
-        foreach (var df in list)
+        var setting = new
         {
-            df.PrepareForApi();
-        }
+            PageSetting.NavView,
+            PageSetting.EnableNavbar,
+            PageSetting.EnableToolbar,
+            PageSetting.EnableAdd,
+            PageSetting.EnableSelect,
+            PageSetting.EnableFooter,
+            PageSetting.IsReadOnly,
+            PageSetting.EnableTableDoubleClick,
+            PageSetting.OrderByKey,
+            PageSetting.DoubleDelete,
+            menuId = Menu?.ID,
+            requiredPermissions = new
+            {
+                add = (Int32)PermissionFlags.Insert,
+                update = (Int32)PermissionFlags.Update,
+                delete = (Int32)PermissionFlags.Delete,
+            },
+        };
 
-        return list;
+        var data = new Dictionary<String, Object>
+        {
+            ["entity"] = PageMetaBuilder.BuildEntity(typeof(TObject), null),
+            ["setting"] = setting,
+            ["form"] = PageMetaBuilder.BuildFields(OnGetFields(ViewKinds.EditForm)),
+        };
+
+        // 预留的页面 UI 扩展键。核心不解释内容，原样下发给前端 preset / 渲染器消费
+        var ui = OnGetPageUi();
+        if (ui != null && ui.Count > 0) data["ui"] = ui;
+
+        if (CheckNotModified(data)) return null;
+
+        return new ApiResponse<Object>
+        {
+            Data = data,
+            TraceId = DefaultSpan.Current?.TraceId,
+        };
     }
+
+    /// <summary>获取页面 UI 扩展。预留键，核心不解释，原样下发给前端</summary>
+    /// <returns>UI 扩展字典；无扩展时返回 null</returns>
+    [NonAction]
+    protected virtual IDictionary<String, Object> OnGetPageUi() => null;
+
+    /// <summary>获取字段信息。支持用户重载并根据上下文定制界面</summary>
+    /// <param name="kind">字段类型：1-列表List、2-详情Detail、3-添加AddForm、4-编辑EditForm、5-搜索Search</param>
+    /// <returns></returns>
+    [NonAction]
+    protected virtual IList<DataField> OnGetFields(ViewKinds kind) => GetMembers(Value?.GetType());
 
     private Boolean GetBool(String name)
     {
@@ -93,7 +130,7 @@ public abstract class ObjectController<TObject> : ControllerBaseX
 
         v = v.Split(",")[0];
 
-        if (!v.EqualIgnoreCase("true", "false")) throw new XException("非法布尔值Request[{0}]={1}", name, v);
+        if (!v.EqualIgnoreCase("true", "false")) throw new XException("Invalid boolean value in request [{0}]={1}", name, v);
 
         return v.ToBoolean();
     }
@@ -121,7 +158,7 @@ public abstract class ObjectController<TObject> : ControllerBaseX
                 sb.AppendFormat("{0}:{1}=>{2}", name, v2, v1);
             }
         }
-        WriteLog("修改", true, sb.ToString());
+        WriteLog(L.T("Update"), true, sb.ToString());
     }
 
     private static readonly Dictionary<Type, IList<DataField>> _cache = new();

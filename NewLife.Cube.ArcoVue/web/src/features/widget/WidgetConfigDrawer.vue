@@ -425,7 +425,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import type { WidgetInstance, WidgetSourceItem } from '@newlifex/api-core';
+import type { WidgetInstance, WidgetSourceItem } from '@newlifex/cube';
 import WidgetScopeFilter from './WidgetScopeFilter.vue';
 import { CHART_TYPE_OPTIONS, MEASURE_FN_LABELS } from './chartTemplates';
 import { useWidgetConfigDrawer, type WidgetConfigDrawerProps } from './useWidgetConfigDrawer';

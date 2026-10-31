@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import type { TenantItem, TenantListResult } from '@newlifex/api-core';
+import type { TenantItem, TenantListResult } from '@newlifex/cube';
 import cubeApi from '@/api';
 
 const CODE_KEY = 'cube.tenant.code';

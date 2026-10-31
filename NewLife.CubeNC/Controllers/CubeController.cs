@@ -405,7 +405,7 @@ public class CubeController(IFileStorage fileStorage, TokenService tokenService,
         if (id <= 0) throw new ArgumentNullException(nameof(id));
 
         if (ManageProvider.Provider?.FindByID(id) is not IUser user)
-            throw new Exception("用户不存在 " + id);
+            throw new Exception("User not found: " + id);
 
         var set = CubeSetting.Current;
         var av = "";
@@ -784,7 +784,7 @@ public class CubeController(IFileStorage fileStorage, TokenService tokenService,
 
         // 模板域仅接受 ViewsJson/FiltersJson；FormJson 不属模板域（走 ViewProfile 全局唯一逻辑）
         var entity = global::NewLife.Cube.Entity.ViewProfile.SaveGlobalTemplate(typePath, model.ViewsJson, model.FiltersJson, model.DashboardJson);
-        WriteLog("发布模板", true, $"typePath={typePath} 视图/筛选模板已发布");
+        WriteLog("Publish template", true, $"typePath={typePath} the view/filter template has been published");
         return Json(0, null, entity?.ToModel());
     }
 
@@ -805,7 +805,7 @@ public class CubeController(IFileStorage fileStorage, TokenService tokenService,
         if (typePath.IsNullOrEmpty()) return Json(400, "typePath 不能为空");
 
         global::NewLife.Cube.Entity.ViewProfile.DeleteGlobalTemplate(typePath);
-        WriteLog("删除模板", true, $"typePath={typePath} 视图/筛选模板已删除");
+        WriteLog("Delete template", true, $"typePath={typePath} the view/filter template has been deleted");
         return Json(0, "ok");
     }
 

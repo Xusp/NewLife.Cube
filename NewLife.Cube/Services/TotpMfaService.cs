@@ -8,16 +8,19 @@ namespace NewLife.Cube.Services;
 
 /// <summary>内置 TOTP MFA 服务。遵循 RFC 6238，与 Google/Microsoft Authenticator 兼容，零外部依赖</summary>
 /// <remarks>
-/// MFA 数据持久化到 User 扩展列（避免写入 Entity._Items 仅内存、Update 不落库导致登录永不触发 MFA）：
-/// - <c>Ex4</c>：Base32 TOTP 密钥（<see cref="ExtSecret"/>）
-/// - <c>Ex5</c>：已激活标记，值为 true（<see cref="ExtEnabled"/>）
-/// - <c>Ex6</c>：一次性备用码，逗号分隔（<see cref="ExtBackupCodes"/>）
-/// </remarks>
+/// MFA 数据以字典参数（<see cref="Parameter"/>，类别 <c>Mfa</c>）随用户持久化，key 约定如下：
+/// - <c>MfaTotpSecret</c>：Base32 格式的 TOTP 密钥（激活后仍保留，用于后续校验）
+/// - <c>MfaEnabled</c>：true 表示已激活
+/// - <c>MfaBackupCodes</c>：逗号分隔的一次性备用码（一经使用立即删除）
+/// 不能存放在 User 索引器的扩展字典里：该字典仅内存有效，跨请求加载后丢失，会导致 MFA 永远处于未开启状态/// </remarks>
 public class TotpMfaService : IMfaService
 {
     private const String ExtSecret = "MfaTotpSecret";
     private const String ExtEnabled = "MfaEnabled";
     private const String ExtBackupCodes = "MfaBackupCodes";
+
+    // MFA 状态在字典参数中的类别
+    private const String MfaCategory = "Mfa";
 
     // MFA 挂起令牌的缓存前缀与 TTL（秒）
     private const String MfaPendingPrefix = "MfaPending:";
@@ -37,9 +40,8 @@ public class TotpMfaService : IMfaService
         if (user == null) throw new ArgumentNullException(nameof(user));
 
         var secret = GenerateBase32Secret();
-        // 写入 Extends，等待激活；激活前不设置 MfaEnabled
+        // 写入字典参数，等待激活；激活前不设置 MfaEnabled
         SetExtend(user, ExtSecret, secret);
-        SaveExtends(user);
 
         var label = Uri.EscapeDataString($"{issuer}:{user.Name}");
         var iss = Uri.EscapeDataString(issuer);
@@ -54,16 +56,15 @@ public class TotpMfaService : IMfaService
         if (user == null) throw new ArgumentNullException(nameof(user));
 
         var secret = GetExtend(user, ExtSecret);
-        if (secret.IsNullOrEmpty()) throw new InvalidOperationException("请先调用 Setup 初始化 MFA");
+        if (secret.IsNullOrEmpty()) throw new InvalidOperationException(L.T("Please call Setup to initialize MFA first."));
 
         if (!VerifyTotp(secret, code))
-            throw new InvalidOperationException("验证码错误，请确认 Authenticator App 时间已同步");
+            throw new InvalidOperationException(L.T("Incorrect verification code. Please ensure the Authenticator app time is synchronized."));
 
         // 激活：生成备用码
         var backupCodes = GenerateBackupCodes(10);
         SetExtend(user, ExtEnabled, "true");
         SetExtend(user, ExtBackupCodes, backupCodes.Join(","));
-        SaveExtends(user);
 
         return backupCodes;
     }
@@ -76,7 +77,6 @@ public class TotpMfaService : IMfaService
         RemoveExtend(user, ExtSecret);
         RemoveExtend(user, ExtEnabled);
         RemoveExtend(user, ExtBackupCodes);
-        SaveExtends(user);
     }
 
     /// <inheritdoc/>
@@ -199,52 +199,33 @@ public class TotpMfaService : IMfaService
         // 删除已用备用码
         codes.RemoveAt(idx);
         SetExtend(user, ExtBackupCodes, codes.Join(","));
-        SaveExtends(user);
         return true;
     }
 
     private static String GetExtend(IUser user, String key)
     {
-        if (user is not User u) return null;
-        // 优先读持久化列；兼容同进程内旧版 _Items 内存键
-        var fromCol = key switch
-        {
-            ExtSecret => u.Ex4,
-            ExtEnabled => u.Ex5,
-            ExtBackupCodes => u.Ex6,
-            _ => null
-        };
-        if (!fromCol.IsNullOrEmpty()) return fromCol;
-        return u[key] as String;
+        if (user is not User u || u.ID <= 0) return null;
+
+        var list = Parameter.FindAllByUserID(u.ID, MfaCategory);
+        return list.FirstOrDefault(e => e.Name == key)?.Value;
     }
 
     private static void SetExtend(IUser user, String key, String value)
     {
-        if (user is not User u) return;
-        switch (key)
-        {
-            case ExtSecret: u.Ex4 = value; break;
-            case ExtEnabled: u.Ex5 = value; break;
-            case ExtBackupCodes: u.Ex6 = value; break;
-            default: u[key] = value; break;
-        }
+        if (user is not User u || u.ID <= 0) return;
+
+        var p = Parameter.GetOrAdd(u.ID, MfaCategory, key);
+        p.Value = value;
+        p.Update();
     }
 
     private static void RemoveExtend(IUser user, String key)
     {
-        if (user is not User u) return;
-        switch (key)
-        {
-            case ExtSecret: u.Ex4 = null; break;
-            case ExtEnabled: u.Ex5 = null; break;
-            case ExtBackupCodes: u.Ex6 = null; break;
-            default: u[key] = null; break;
-        }
-    }
+        if (user is not User u || u.ID <= 0) return;
 
-    private static void SaveExtends(IUser user)
-    {
-        if (user is User u) u.Update();
+
+        var list = Parameter.FindAllByUserID(u.ID, MfaCategory);
+        list.FirstOrDefault(e => e.Name == key)?.Delete();
     }
 
     #region Base32 编解码（RFC 4648，无外部依赖）
@@ -290,7 +271,7 @@ public class TotpMfaService : IMfaService
         foreach (var c in s.ToUpperInvariant())
         {
             if (c == '=' || c == ' ') continue;
-            if (c >= 128 || lookup[c] < 0) throw new FormatException($"无效的 Base32 字符: {c}");
+            if (c >= 128 || lookup[c] < 0) throw new FormatException(L.T("Invalid Base32 character: {0}.", c));
             buf = (buf << 5) | lookup[c];
             bitsLeft += 5;
             if (bitsLeft >= 8)

@@ -1,4 +1,4 @@
-﻿# 第34章 自定义实体与模型
+# 第34章 自定义实体与模型
 
 > 本章介绍如何在魔方中自定义实体和模型，包括 IModel 接口、Model 层设计、实体与模型映射等内容。
 
@@ -624,4 +624,4 @@ public class ApiResult<T>
 
 ---
 
-**下一章**：[快速开始WebAPI版](快速开始WebAPI版.md) - 了解 WebAPI 版魔方的使用
+**下一章**：[快速开始WebAPI版](Api/快速开始WebAPI版.md) - 了解 WebAPI 版魔方的使用

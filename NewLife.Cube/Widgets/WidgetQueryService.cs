@@ -142,21 +142,21 @@ public static class WidgetQueryService
     /// <summary>执行查询。无权限抛 ApiException 403；非法参数 400。</summary>
     public static WidgetQueryResult Execute(IUser user, WidgetQueryRequest? req)
     {
-        if (req == null) throw new ApiException(400, "body 不能为空");
+        if (req == null) throw new ApiException(400, "body cannot be empty");
         RejectForbiddenKeys(req);
         var typePath = AutomationPaths.NormalizeTypePath(req.TypePath);
-        if (typePath.IsNullOrEmpty()) throw new ApiException(400, "typePath 不能为空");
-        if (user == null) throw new ApiException(401, "未授权");
+        if (typePath.IsNullOrEmpty()) throw new ApiException(400, "typePath cannot be empty");
+        if (user == null) throw new ApiException(401, "Unauthorized");
         if (!AutomationAuth.HasPermission(user, typePath, PermissionFlags.Detail))
-            throw new ApiException(403, "无权查看");
+            throw new ApiException(403, "Access denied");
 
         var entityType = FindEntityType(typePath);
-        if (entityType == null) throw new ApiException(400, "未知实体");
+        if (entityType == null) throw new ApiException(400, "Unknown entity");
         var fact = EntityFactory.CreateFactory(entityType);
-        if (fact == null) throw new ApiException(400, "未知实体");
+        if (fact == null) throw new ApiException(400, "Unknown entity");
 
         var ctrlType = FindControllerType(entityType);
-        if (ctrlType == null) throw new ApiException(403, "无法解析实体控制器");
+        if (ctrlType == null) throw new ApiException(403, "Cannot resolve the entity controller");
 
         var hostApplied = false;
         var where = BuildWhere(user, fact, ctrlType, entityType, req, typePath, ref hostApplied);
@@ -221,7 +221,7 @@ public static class WidgetQueryService
         foreach (var key in req.Extra.Keys)
         {
             if (key.EqualIgnoreCase("sql", "script", "join"))
-                throw new ApiException(400, "禁止 SQL/脚本/JOIN");
+                throw new ApiException(400, "SQL, scripts and JOIN are not allowed");
         }
     }
 
@@ -276,7 +276,7 @@ public static class WidgetQueryService
         {
             var builder = new WhereBuilder { Factory = fact, Expression = att.Expression };
             try { exp = builder.GetExpression(); }
-            catch { throw new ApiException(400, "数据权限表达式无法解析"); }
+            catch { throw new ApiException(400, "The data-permission expression cannot be parsed"); }
         }
 
         // 行权（OSC-2608273d95）：聚合/列表与页面列表同一助手合并 DataScope 四档；
@@ -292,14 +292,11 @@ public static class WidgetQueryService
             var mode = ctx.GetTenantMode();
             if (mode == TenantMode.None)
             {
-                if (CubeSetting.Current.TenantEnforceMode != TenantEnforceModes.Shadow)
+                var uk = fact.Unique;
+                if (uk != null)
                 {
-                    var uk = fact.Unique;
-                    if (uk != null)
-                    {
-                        var closed = uk.Equal(-1);
-                        exp = exp == null ? closed : exp & closed;
-                    }
+                    var closed = uk.Equal(-1);
+                    exp = exp == null ? closed : exp & closed;
                 }
             }
             else if (mode == TenantMode.Tenant)
@@ -342,7 +339,7 @@ public static class WidgetQueryService
         if (HasConditions(extraFilter))
         {
             var extra = AutomationFilter.TryBuildWhere(fact, extraFilter, allowed);
-            if (extra == null) throw new ApiException(400, "筛选无法下推");
+            if (extra == null) throw new ApiException(400, "The filter cannot be pushed down");
             exp = exp == null ? extra : exp & extra;
         }
 
@@ -351,7 +348,7 @@ public static class WidgetQueryService
             if (hostPath.EqualIgnoreCase(typePath))
             {
                 var hostExp = AutomationFilter.TryBuildWhere(fact, req.HostFilter, allowed);
-                if (hostExp == null) throw new ApiException(400, "筛选无法下推");
+                if (hostExp == null) throw new ApiException(400, "The filter cannot be pushed down");
                 exp = exp == null ? hostExp : exp & hostExp;
                 hostApplied = true;
             }
@@ -363,7 +360,7 @@ public static class WidgetQueryService
                     if (link == null) continue;
                     if (String.IsNullOrEmpty(link.HostField) || String.IsNullOrEmpty(link.SourceField)) continue;
                     var srcFi = fact.Table.FindByName(link.SourceField);
-                    if (srcFi is null) throw new ApiException(400, $"未知源字段 {link.SourceField}");
+                    if (srcFi is null) throw new ApiException(400, $"Unknown source field {link.SourceField}");
                     Object raw = null;
                     if (req.HostValues != null)
                     {
@@ -384,7 +381,7 @@ public static class WidgetQueryService
                     }
                     catch
                     {
-                        throw new ApiException(400, "跨实体字段类型不兼容");
+                        throw new ApiException(400, "Cross-entity field types are incompatible");
                     }
                 }
                 // $host 解析成功也视为已应用宿主上下文（前端据此隐藏「未联动」角标）
@@ -418,7 +415,7 @@ public static class WidgetQueryService
             if (c == null) continue;
             var field = GetHostRefField(c.Value);
             if (field == "")
-                throw new ApiException(400, "筛选值无效");
+                throw new ApiException(400, "Invalid filter value");
             if (field != null)
             {
                 changed = true;
@@ -523,7 +520,7 @@ public static class WidgetQueryService
             "avg" => fi.Avg(),
             "min" => fi.Min(),
             "max" => fi.Max(),
-            _ => throw new ApiException(400, "非法度量"),
+            _ => throw new ApiException(400, "Invalid measure"),
         };
         var row = fact.FindAll(where, null, selects, 0, 1).FirstOrDefault();
         return row?[fi.Name];
@@ -533,7 +530,7 @@ public static class WidgetQueryService
     {
         var groupFi = fact.Table.FindByName(req.GroupBy)
             ?? fact.Fields.FirstOrDefault(f => f.Name.EqualIgnoreCase(req.GroupBy));
-        if (groupFi is null) throw new ApiException(400, "未知分组字段");
+        if (groupFi is null) throw new ApiException(400, "Unknown group field");
         var top = Math.Min(limit, 20);
 
         // 多度量（OSC-260920）：m0..mN 与 measures 对齐；首度量同时写入 Value 兼容旧前端
@@ -645,12 +642,12 @@ public static class WidgetQueryService
 
     static FieldItem ResolveNumeric(IEntityFactory fact, String field)
     {
-        if (field.IsNullOrEmpty()) throw new ApiException(400, "度量字段不能为空");
+        if (field.IsNullOrEmpty()) throw new ApiException(400, "Measure field cannot be empty");
         var fi = FindField(fact, field);
-        if (fi is null) throw new ApiException(400, "未知度量字段");
-        if (fi.PrimaryKey || fi.IsIdentity) throw new ApiException(400, "非法度量字段");
-        if (fi.Name.EqualIgnoreCase("Password", "Secret", "Salt")) throw new ApiException(400, "非法度量字段");
-        if (!IsNumericType(fi.Type)) throw new ApiException(400, "度量字段必须为数值");
+        if (fi is null) throw new ApiException(400, "Unknown measure field");
+        if (fi.PrimaryKey || fi.IsIdentity) throw new ApiException(400, "Invalid measure field");
+        if (fi.Name.EqualIgnoreCase("Password", "Secret", "Salt")) throw new ApiException(400, "Invalid measure field");
+        if (!IsNumericType(fi.Type)) throw new ApiException(400, "Measure field must be numeric");
         return fi;
     }
 
@@ -726,7 +723,7 @@ public static class WidgetQueryService
         else if (req.Measure != null)
             list.Add(req.Measure);
         if (list.Count == 0) list.Add(new WidgetMeasure { Fn = "count" });
-        if (list.Count > MaxMeasures) throw new ApiException(400, $"度量不能超过 {MaxMeasures} 个");
+        if (list.Count > MaxMeasures) throw new ApiException(400, $"At most {MaxMeasures} measures are allowed");
 
         foreach (var m in list)
         {
@@ -763,7 +760,7 @@ public static class WidgetQueryService
                     "avg" => $"{fi.Avg(alias)}",
                     "min" => $"{fi.Min(alias)}",
                     "max" => $"{fi.Max(alias)}",
-                    _ => throw new ApiException(400, "非法度量"),
+                    _ => throw new ApiException(400, "Invalid measure"),
                 };
             }
             cols.Add(col);
@@ -799,9 +796,9 @@ public static class WidgetQueryService
     {
         var timeFi = fact.Table.FindByName(req.TimeField)
             ?? fact.Fields.FirstOrDefault(f => f.Name.EqualIgnoreCase(req.TimeField));
-        if (timeFi is null) throw new ApiException(400, "未知时间字段");
+        if (timeFi is null) throw new ApiException(400, "Unknown time field");
         var tt = Nullable.GetUnderlyingType(timeFi.Type) ?? timeFi.Type;
-        if (tt != typeof(DateTime)) throw new ApiException(400, "时间字段必须为日期时间");
+        if (tt != typeof(DateTime)) throw new ApiException(400, "Time field must be a datetime");
 
         var buckets = req.Buckets <= 0 ? 12 : req.Buckets;
         if (buckets > 24) buckets = 24;
@@ -811,7 +808,7 @@ public static class WidgetQueryService
 
         var dbType = fact.Session.Dal.DbType;
         var dayExpr = DateBucketSql(dbType, timeFi.ColumnName);
-        if (dayExpr.IsNullOrEmpty()) throw new ApiException(400, "不支持时间分桶");
+        if (dayExpr.IsNullOrEmpty()) throw new ApiException(400, "Time bucketing is not supported");
 
         // 多度量（OSC-260920）：时间桶恒定按 Bucket 正序
         var measures = ResolveMeasures(fact, req);

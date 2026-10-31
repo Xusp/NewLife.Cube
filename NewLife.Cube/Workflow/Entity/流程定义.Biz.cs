@@ -56,13 +56,13 @@ public partial class WorkflowDefinition : Entity<WorkflowDefinition>
         if (!HasDirty) return true;
 
         // 这里验证参数范围，建议抛出参数异常，指定参数名，前端用户界面可以捕获参数异常并聚焦到对应的参数输入框
-        if (TypePath.IsNullOrEmpty()) throw new ArgumentNullException(nameof(TypePath), "实体路径不能为空！");
+        if (TypePath.IsNullOrEmpty()) throw new ArgumentNullException(nameof(TypePath), "Entity path cannot be empty.");
         TypePath = TypePath.Trim();
-        if (TypePath.IsNullOrEmpty()) throw new ArgumentNullException(nameof(TypePath), "实体路径不能为空！");
+        if (TypePath.IsNullOrEmpty()) throw new ArgumentNullException(nameof(TypePath), "Entity path cannot be empty.");
 
-        if (Name.IsNullOrEmpty()) throw new ArgumentNullException(nameof(Name), "名称不能为空！");
+        if (Name.IsNullOrEmpty()) throw new ArgumentNullException(nameof(Name), "Name cannot be empty.");
         Name = Name.Trim();
-        if (Name.IsNullOrEmpty() || Name.Length > 50) throw new ArgumentOutOfRangeException(nameof(Name), "名称长度须为 1–50！");
+        if (Name.IsNullOrEmpty() || Name.Length > 50) throw new ArgumentOutOfRangeException(nameof(Name), "Name length must be 1-50.");
 
         if (LockPolicy.IsNullOrEmpty()) LockPolicy = WorkflowStatuses.LockFull;
         if (Version <= 0) Version = 1;
@@ -166,9 +166,9 @@ public partial class WorkflowDefinition : Entity<WorkflowDefinition>
     /// <returns>是否发布成功</returns>
     public Boolean Publish()
     {
-        if (TypePath.IsNullOrEmpty()) throw new InvalidOperationException("实体路径不能为空");
-        if (Name.IsNullOrEmpty()) throw new InvalidOperationException("名称不能为空");
-        if (GraphJson.IsNullOrEmpty()) throw new InvalidOperationException("设计图不能为空，无法发布");
+        if (TypePath.IsNullOrEmpty()) throw new InvalidOperationException("Entity path cannot be empty");
+        if (Name.IsNullOrEmpty()) throw new InvalidOperationException("Name cannot be empty");
+        if (GraphJson.IsNullOrEmpty()) throw new InvalidOperationException("The design graph cannot be empty; publish is not possible");
 
         PublishedGraphJson = GraphJson;
         Version = Version <= 0 ? 1 : Version + 1;

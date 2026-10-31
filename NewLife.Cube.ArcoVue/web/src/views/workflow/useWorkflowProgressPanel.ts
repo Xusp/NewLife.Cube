@@ -1,5 +1,5 @@
 import { computed, ref, watch, type Ref } from 'vue';
-import type { WorkflowPhrase } from '@newlifex/api-core';
+import type { WorkflowPhrase } from '@newlifex/cube';
 import cubeApi from '@/api';
 import { actionLabel, useWorkflowProgress, wfIdOf, type WfId } from './useWorkflowProgress';
 import { nodeFlags, opinionTimeline, previewKind, rollbackTargets, splitAttachments, type ProgressAttachment } from './wfProgressFlow';

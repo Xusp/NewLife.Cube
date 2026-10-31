@@ -95,7 +95,7 @@ public static class CubeWidgetManager
                 });
             }
         }
-        XTrace.WriteLine("CubeWidget 扫描到 {0} 个 named 部件", list.Count);
+        XTrace.WriteLine("CubeWidget discovered {0} named widgets", list.Count);
         return list;
     }
 }

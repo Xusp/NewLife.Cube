@@ -1,4 +1,4 @@
-import type { LoginConfig } from '@newlifex/api-core';
+import type { LoginConfig } from '@newlifex/cube';
 import type { FieldMeta } from '../types/field';
 
 export const ACCOUNT_TABS = ['profile', 'password', 'security', 'binds', 'links'] as const;

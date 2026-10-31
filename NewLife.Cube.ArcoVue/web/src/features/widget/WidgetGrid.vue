@@ -12,7 +12,7 @@
 </template>
 
 <script setup lang="ts">
-import type { WidgetInstance } from '@newlifex/api-core';
+import type { WidgetInstance } from '@newlifex/cube';
 import { useWidgetGrid } from './useWidgetGrid';
 
 const props = defineProps<{ widgets: WidgetInstance[] }>();

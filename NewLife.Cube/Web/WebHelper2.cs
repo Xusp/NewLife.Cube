@@ -176,7 +176,7 @@ public static class WebHelper2
         var sb = Pool.StringBuilder.Get();
         try
         {
-            sb.Append("直连=").Append(remote + "");
+            sb.Append("Direct=").Append(remote + "");
             var xff = request.Headers["X-Forwarded-For"] + "";
             if (xff.IsNullOrEmpty()) xff = request.Headers["HTTP_X_FORWARDED_FOR"] + "";
             if (!xff.IsNullOrEmpty()) sb.Append("; XFF=").Append(xff);
@@ -240,7 +240,7 @@ public static class WebHelper2
             {
                 set.Save();
 
-                XTrace.WriteLine("安全防御自动学习可信代理 {0}，累计 {1}/{2} 个", ip, list.Count, max);
+                XTrace.WriteLine("Security defense learned trusted proxy {0}; total {1}/{2}", ip, list.Count, max);
             }
             catch (Exception ex)
             {

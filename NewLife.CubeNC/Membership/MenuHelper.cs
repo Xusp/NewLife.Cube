@@ -13,8 +13,38 @@ namespace NewLife.Cube.Membership;
 /// <summary>
 /// 菜单助手
 /// </summary>
-public static class MenuHelper
+public static partial class MenuHelper
 {
+    /// <summary>获取权限子项显示名。标准权限位从枚举取源文，自定义动作保留 {type} 模板</summary>
+    /// <param name="menu">菜单</param>
+    /// <param name="key">权限位</param>
+    /// <param name="value">落库的权限名称</param>
+    /// <returns>本地化权限名称</returns>
+    public static String? GetPermissionName(IMenu menu, Int32 key, String? value)
+    {
+        var flag = (PermissionFlags)(UInt32)key;
+        if (key > 0 && key <= (Int32)PermissionFlags.Delete && Enum.IsDefined(typeof(PermissionFlags), flag))
+            return L.T(flag.GetDescription());
+
+        var text = L.T(value);
+        if (!text.IsNullOrEmpty() && text.Contains("{type}")) text = text.Replace("{type}", GetDisplayName(menu));
+
+        return text;
+    }
+
+    /// <summary>获取当前语言下的权限子项字典</summary>
+    /// <param name="menu">菜单</param>
+    /// <returns>权限位到本地化名称的映射</returns>
+    public static Dictionary<Int32, String> GetPermissions(IMenu menu)
+    {
+        var dic = new Dictionary<Int32, String>();
+        if (menu?.Permissions == null) return dic;
+
+        foreach (var item in menu.Permissions) dic[item.Key] = GetPermissionName(menu, item.Key, item.Value);
+
+        return dic;
+    }
+
     /// <summary>扫描命名空间下的控制器并添加为菜单</summary>
     /// <param name="menuFactory">菜单工厂</param>
     /// <param name="rootName">根菜单名称，所有菜单附属在其下</param>
@@ -75,6 +105,10 @@ public static class MenuHelper
                 root.Ex4 = attArea.HelpUrl;
             }
         }
+
+        // 区域根菜单：显示名为空时才写入区域显示名，已有值保持不动
+        FillDisplayName(root, areaType.GetDisplayName() ?? rootName);
+
         if (root.FullName != nameSpace) root.FullName = nameSpace;
         (root as IEntity).Save();
 
@@ -111,11 +145,18 @@ public static class MenuHelper
                     if (controller2 is IEntity entity) entity.Delete();
                 }
             }
+            var entityType = GetEntityType(type);
+            var friendly = type.GetDisplayName() ?? GetEntityDisplayName(entityType) ?? name;
+
             if (controller == null)
             {
                 controller = menuFactory.FindByUrl(url);
-                controller ??= node.Add(name, type.GetDisplayName(), type.FullName, url);
+                // 新菜单直接带上控制器全名与显示名，后续扫描只在显示名为空时补齐
+                controller ??= node.Add(name, friendly, type.FullName, url);
             }
+
+            // 显示名只在为空时填充，已有值（开发者语言或管理员修改）保持不动
+            FillDisplayName(controller, friendly);
             controller.Url = url;
             controller.FullName = type.FullName;
             if (controller.Remark.IsNullOrEmpty()) controller.Remark = type.GetDescription();
@@ -124,7 +165,6 @@ public static class MenuHelper
             list.Add(controller);
 
             // 注册实体类型到页面的映射，供外键跳转链接使用
-            var entityType = GetEntityType(type);
             if (entityType != null)
             {
                 var factory = EntityFactory.CreateFactory(entityType);
@@ -144,8 +184,8 @@ public static class MenuHelper
                 {
                     var method = item.Key;
 
+                    // 保留 {type} 模板，渲染期按当前语言翻译后再替换
                     var dn = method.GetDisplayName();
-                    if (!dn.IsNullOrEmpty()) dn = dn.Replace("{type}", (controller as Menu)?.FriendName);
 
                     var pmName = !dn.IsNullOrEmpty() ? dn : method.Name;
                     if (item.Value <= (Int32)PermissionFlags.Delete) pmName = ((PermissionFlags)item.Value).GetDescription();
@@ -175,8 +215,8 @@ public static class MenuHelper
                         {
                             var method = item.Key;
 
+                            // 保留 {type} 模板，渲染期按当前语言翻译后再替换
                             var dn = method.GetDisplayName();
-                            if (!dn.IsNullOrEmpty()) dn = dn.Replace("{type}", (controller as Menu)?.FriendName);
 
                             var pmName = !dn.IsNullOrEmpty() ? dn : method.Name;
                             if (item.Value <= (Int32)PermissionFlags.Delete) pmName = ((PermissionFlags)item.Value).GetDescription();
@@ -229,7 +269,7 @@ public static class MenuHelper
         {
             var task = Task.Factory.StartNew(() =>
             {
-                XTrace.WriteLine("新增了菜单，需要检查权限");
+                XTrace.WriteLine(L.TLog("New menus added, permission check required"));
                 //var fact = typeof(Role).AsFactory();
                 //fact.EntityType.Invoke("CheckRole");
                 Role.CheckRole();
@@ -253,14 +293,6 @@ public static class MenuHelper
         var factory = pi?.GetValue(null, null) as IEntityFactory;
         //if (factory == null) return dic;
 
-        // 设置显示名
-        if (menu.DisplayName.IsNullOrEmpty() && factory != null)
-        {
-            menu.DisplayName = factory.Table.DataTable.DisplayName;
-            menu.Visible = true;
-            //menu.Save();
-        }
-
         // 添加该类型下的所有Action
         foreach (var method in controllerType.GetMethods())
         {
@@ -280,11 +312,16 @@ public static class MenuHelper
                 // 添加系统信息菜单
                 var name = method.Name;
                 var m2 = menu.Parent.Childs.FirstOrDefault(_ => _.Name == name);
-                m2 ??= menu.Parent.Add(name, method.GetDisplayName(), $"{controllerType.FullName}.{name}", $"{menu.Url}/{name}");
+                var m2Key = $"{controllerType.FullName}.{name}";
+                var m2Name = method.GetDisplayName() ?? name;
+                if (m2 == null) m2 = menu.Parent.Add(name, m2Name, m2Key, $"{menu.Url}/{name}");
+
+                // 显示名只在为空时填充，管理员改过的名字保持不动
+                FillDisplayName(m2, m2Name);
                 if (m2.Sort == 0) m2.Sort = attMenu.Order;
                 if (m2.Icon.IsNullOrEmpty()) m2.Icon = attMenu.Icon;
                 if (m2.Ex4.IsNullOrEmpty()) m2.Ex4 = attMenu.HelpUrl;
-                if (m2.FullName.IsNullOrEmpty()) m2.FullName = $"{controllerType.FullName}.{name}";
+                if (m2.FullName.IsNullOrEmpty()) m2.FullName = m2Key;
                 if (attAuth != null) m2.Permissions[(Int32)attAuth.Permission] = attAuth.Permission.GetDescription();
                 if (m2 is IEntity entity) entity.Update();
             }
@@ -306,38 +343,42 @@ public static class MenuHelper
     }
 
     /// <summary>根据租户隔离菜单</summary>
-    /// <param name="menus"></param>
-    /// <param name="isTenant"></param>
-    /// <returns></returns>
+    /// <param name="menus">菜单树；可为 null（空菜单时 GetMenuTree 返回 null），此时返回空列表</param>
+    /// <param name="isTenant">当前是否租户模式</param>
+    /// <returns>过滤后的菜单列表，永不返回 null</returns>
     public static IList<MenuTree> FilterByTenant(IList<MenuTree> menus, Boolean isTenant)
     {
         var list = new List<MenuTree>();
+        // GetMenuTree 在无可用菜单时返回 null；租户↔管理后台切换后偶发空树，必须容错避免 NRE
+        if (menus == null || menus.Count == 0) return list;
 
         foreach (var item in menus)
         {
-            if (!item.FullName.IsNullOrEmpty())
+            if (item == null || item.FullName.IsNullOrEmpty()) continue;
+
+            // 控制器菜单是否支持租户显示
+            if (CheckVisibleInTenant(item))
             {
-                // 控制器菜单是否支持租户显示
-                if (CheckVisibleInTenant(item))
-                {
-                    // 支持租户显示，且当前是租户，则显示
-                    if (isTenant)
-                        list.Add(item);
-                    // 同时支持租户和管理员显示
-                    else if (CheckVisibleInAdmin(item))
-                        list.Add(item);
-                }
+                // 支持租户显示，且当前是租户，则显示
+                if (isTenant)
+                    list.Add(item);
+                // 同时支持租户和管理员显示
+                else if (CheckVisibleInAdmin(item))
+                    list.Add(item);
+            }
+            else
+            {
+                // 不支持租户显示，且不是租户，则显示
+                if (!isTenant)
+                    list.Add(item);
                 else
                 {
-                    // 不支持租户显示，且不是租户，则显示
-                    if (!isTenant)
+                    // 虽然当前大菜单不支持租户显示，但是子菜单支持，则显示。
+                    // Children 为懒加载，getter 可能因子源为 null 失败，需兜底避免切换账号时首页崩溃。
+                    IList<MenuTree> children = null;
+                    try { children = item.Children; } catch { /* 忽略懒加载失败 */ }
+                    if (children != null && children.Any(e => e != null && CheckVisibleInTenant(e)))
                         list.Add(item);
-                    else if (item.Children != null)
-                    {
-                        // 虽然当前大菜单不支持租户显示，但是子菜单支持，则显示
-                        if (item.Children.Any(e => CheckVisibleInTenant(e)))
-                            list.Add(item);
-                    }
                 }
             }
         }
@@ -349,17 +390,10 @@ public static class MenuHelper
     static Boolean CheckVisibleInTenant(MenuTree menu)
     {
         var key = menu.FullName;
+        if (key.IsNullOrEmpty()) return false;
         if (_tenants.TryGetValue(key, out var rs)) return rs;
 
-        var type = Type.GetType(menu.FullName);
-        if (type == null)
-        {
-            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                type = assembly.GetType(menu.FullName);
-                if (type != null) break;
-            }
-        }
+        var type = ResolveMenuType(key);
         var att = type?.GetCustomAttribute<MenuAttribute>();
         if (att != null && att.Mode.Has(MenuModes.Tenant))
         {
@@ -373,9 +407,11 @@ public static class MenuHelper
     static Boolean CheckVisibleInAdmin(MenuTree menu)
     {
         var key = menu.FullName;
+        if (key.IsNullOrEmpty()) return false;
         if (_admins.TryGetValue(key, out var rs)) return rs;
 
-        var type = Type.GetType(menu.FullName);
+        // 与 CheckVisibleInTenant 一致：跨程序集解析控制器类型，避免双模式菜单在管理后台被误隐藏
+        var type = ResolveMenuType(key);
         var att = type?.GetCustomAttribute<MenuAttribute>();
         if (att != null && att.Mode.Has(MenuModes.Admin))
         {
@@ -383,24 +419,5 @@ public static class MenuHelper
         }
 
         return _admins[key] = false;
-    }
-
-    /// <summary>从控制器类型的继承链中提取 ReadOnlyEntityController&lt;TEntity&gt; 的泛型实参</summary>
-    /// <param name="controllerType">控制器类型</param>
-    /// <returns>实体类型，非实体控制器返回 null</returns>
-    private static Type GetEntityType(Type controllerType)
-    {
-        var t = controllerType;
-        while (t != null && t != typeof(Object))
-        {
-            if (t.IsGenericType)
-            {
-                var name = t.GetGenericTypeDefinition().Name;
-                if (name.StartsWith("ReadOnlyEntityController`") || name.StartsWith("EntityController`"))
-                    return t.GetGenericArguments()[0];
-            }
-            t = t.BaseType;
-        }
-        return null;
     }
 }

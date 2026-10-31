@@ -57,8 +57,8 @@ public class AiController : ControllerBaseX
 
     #region AI 对话
     /// <summary>AI 对话（全局统一端点）。按请求目标解析页面控制器能力，SSE 流式返回</summary>
-    /// <returns></returns>
-    [DisplayName("AI 对话")]
+    /// <returns>SSE 流式响应，逐段输出助手回复与工具事件</returns>
+    [DisplayName("AI chat")]
     [EntityAuthorize(PermissionFlags.Detail)]
     [HttpPost]
     public async Task<ActionResult> AiChat()
@@ -88,7 +88,7 @@ public class AiController : ControllerBaseX
         if (target is IEntityAiContext eac)
         {
             // 实体控制器：按目标实体页 Detail 权限校验（等价原 {controller}/AiChat 的 EntityAuthorize），拒绝越权对话
-            if (!CheckEntityPermission(target.GetType())) return Json(403, null, "无权访问该页面数据");
+            if (!CheckEntityPermission(target.GetType())) return Json(403, null, L.T("You do not have permission to access the data on this page."));
 
             // 实体上下文工具集由目标控制器自建（保留子类重载 CreateCubeTools），数据查询委托走其 SearchData
             registry.AddTools(eac.CreateCubeTools(pager, request.Id));
@@ -114,25 +114,25 @@ public class AiController : ControllerBaseX
 
     /// <summary>构建 AI 对话系统提示词（全局端点，无实体上下文）</summary>
     /// <param name="req">对话请求</param>
-    /// <returns></returns>
+    /// <returns>系统提示词文本</returns>
     private static String BuildChatSystemPrompt(AiChatRequest req)
     {
         var sysName = SysConfig.Current?.DisplayName;
-        if (sysName.IsNullOrEmpty()) sysName = "魔方后台管理系统";
+        if (sysName.IsNullOrEmpty()) sysName = L.T("Cube admin console");
 
         var sb = Pool.StringBuilder.Get();
-        sb.AppendLine($"你是{sysName}的 AI 助手，正在协助管理员操作当前页面。");
+        sb.AppendLine(L.T("You are the AI assistant of {0}, helping an administrator work on the current page.", sysName));
         sb.AppendLine();
-        sb.AppendLine("当前页面不属于实体数据页面（可能是系统设置、首页或系统信息等），无实体表上下文。");
+        sb.AppendLine(L.T("The current page is not an entity data page (it may be system settings, the home page or system information), so there is no entity table context."));
         sb.AppendLine();
-        sb.AppendLine("可用工具：get_page_context / get_system_info / run_js（详细说明见函数定义，按需调用）");
+        sb.AppendLine(L.T("Available tools: get_page_context / get_system_info / run_js (see the function definitions; call them when needed)"));
         sb.AppendLine();
-        sb.AppendLine("规则：");
-        sb.AppendLine("1. 使用简体中文回答，语言简洁专业");
-        sb.AppendLine("2. 用户询问当前页面内容/数据/结构时，调用 get_page_context 获取页面上下文（自动采集用户浏览器当前页面内容），再给出分析与结论");
-        sb.AppendLine("3. 用户询问系统状态/诊断时，调用 get_system_info 获取数据，再给出分析结论与建议");
-        sb.AppendLine("4. 用户要求读取或操作当前页面元素（填写输入框、点击按钮、读取标题等）时，可调用 run_js 执行 JavaScript；脚本在用户浏览器当前页面执行，可用 document.querySelector 等定位元素；修改页面内容或提交表单等写操作前，先向用户说明将执行的操作");
-        sb.AppendLine("5. 不要编造数据；信息不足时主动询问用户澄清");
+        sb.AppendLine(L.T("Rules:"));
+        sb.AppendLine(L.T("1. Answer in the same language as the user's question, concisely and professionally"));
+        sb.AppendLine(L.T("2. When the user asks about the content, data or structure of the current page, call get_page_context to collect the page context from the user's browser, then give your analysis and conclusion"));
+        sb.AppendLine(L.T("3. When the user asks about system status or diagnostics, call get_system_info, then give conclusions and suggestions"));
+        sb.AppendLine(L.T("4. When the user asks to read or operate elements of the current page (fill inputs, click buttons, read titles and so on), you may call run_js; the script runs in the user's current page and may use document.querySelector to locate elements; explain any write operation (changing page content, submitting forms) to the user before running it"));
+        sb.AppendLine(L.T("5. Never invent data; ask the user for clarification when information is insufficient"));
 
         return sb.Return(true);
     }
@@ -147,13 +147,13 @@ public class AiController : ControllerBaseX
     private static async Task<(ActionResult? Error, CubeAiChatRequest? Req)> ParseAsync(ControllerBaseX ctrl)
     {
         var set = CubeSetting.Current;
-        if (!set.AISwitch) return (ctrl.Json(500, null, "AI 未启用，请联系系统管理员开启 AISwitch"), null);
+        if (!set.AISwitch) return (ctrl.Json(500, null, L.T("AI is not enabled. Please contact the system administrator to enable AISwitch.")), null);
 
         // 读取 JSON 请求体
         var body = await new StreamReader(ctrl.Request.Body).ReadToEndAsync();
-        if (body.IsNullOrEmpty()) return (ctrl.Json(500, null, "请求体为空"), null);
+        if (body.IsNullOrEmpty()) return (ctrl.Json(500, null, L.T("The request body is empty.")), null);
         var req = body.ToJsonEntity<CubeAiChatRequest>();
-        if (req == null || req.Message.IsNullOrEmpty()) return (ctrl.Json(500, null, "消息不能为空"), null);
+        if (req == null || req.Message.IsNullOrEmpty()) return (ctrl.Json(500, null, L.T("The message cannot be empty.")), null);
 
         return (null, req);
     }
@@ -174,7 +174,7 @@ public class AiController : ControllerBaseX
         }
         catch (Exception ex)
         {
-            XTrace.WriteLine("AiChat 解析 _query 失败：{0}", ex.Message);
+            XTrace.WriteLine("AiChat failed to parse _query: {0}", ex.Message);
             return null;
         }
     }
@@ -231,7 +231,7 @@ public class AiController : ControllerBaseX
         var aiSvc = ctrl.HttpContext.RequestServices.GetService<IAIService>();
         if (aiSvc == null)
         {
-            await writeEvent(new { type = "error", message = "AI 服务未注册" }.ToJson());
+            await writeEvent(new { type = "error", message = L.T("AI service is not registered") }.ToJson());
             return;
         }
         // 每请求以当前配置创建编排服务（AI 客户端随配置变化重建，运行中修改配置即时生效）；会话历史经单例 ChatSessionService 保持
@@ -288,7 +288,7 @@ public class AiController : ControllerBaseX
         catch (Exception ex)
         {
             // 目标控制器初始化失败不影响对话可用性，降级为通用流程
-            XTrace.WriteLine("[AI] 初始化目标控制器[{0}]失败：{1}", type.FullName, ex.Message);
+            XTrace.WriteLine("[AI] Failed to initialize target controller [{0}]: {1}", type.FullName, ex.Message);
             return null;
         }
     }
@@ -355,22 +355,22 @@ public class AiController : ControllerBaseX
     #endregion
 
     /// <summary>浏览器操作结果回传。前端执行 run_js 脚本后回传结果，完成等待中的工具调用</summary>
-    /// <returns></returns>
-    [DisplayName("浏览器操作结果回传")]
+    /// <returns>处理结果 JSON</returns>
+    [DisplayName("Browser operation result callback")]
     [EntityAuthorize(PermissionFlags.Detail)]
     [HttpPost]
     public async Task<ActionResult> OperationResult()
     {
         var body = await new StreamReader(Request.Body).ReadToEndAsync();
-        if (body.IsNullOrEmpty()) return Json(500, null, "请求体为空");
+        if (body.IsNullOrEmpty()) return Json(500, null, L.T("The request body is empty."));
         var req = body.ToJsonEntity<BrowserOpResult>();
-        if (req == null || req.CheckpointId.IsNullOrEmpty()) return Json(500, null, "参数错误");
+        if (req == null || req.CheckpointId.IsNullOrEmpty()) return Json(500, null, L.T("Invalid request parameter"));
 
         // 分布式：经 DI 解析检查点服务（事件总线广播，POST 命中任意实例都能唤醒等待方），兜底进程内实例
         var cp = HttpContext.RequestServices.GetService<PageCheckpointService>() ?? PageCheckpointService.Instance;
         var user = HttpContext.User.Identity as IUser;
         var ok = await cp.Respond(req.CheckpointId, user?.ID ?? 0, req.Result ?? "{}");
 
-        return ok ? Json(0, null, "ok") : Json(500, null, "操作不存在或已过期");
+        return ok ? Json(0, null, "ok") : Json(500, null, L.T("The operation does not exist or has expired."));
     }
 }

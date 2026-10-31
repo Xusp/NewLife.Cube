@@ -2,8 +2,8 @@
   <el-dialog
     :model-value="dialogVisible"
     @update:model-value="$emit('update:dialogVisible', $event)"
-    :title="'选择 ' + (lovMeta?.name || lovCode)"
-    width="680px"
+    :title="t('lov.selectTitle', { name: lovMeta?.name || lovCode })"
+    :width="width || '680px'"
     top="5vh"
     append-to-body
     :close-on-click-modal="false"
@@ -15,7 +15,7 @@
           v-if="field.componentType === 'input'"
           v-model="searchParams[field.field]"
           :placeholder="field.title"
-          size="small"
+          :size="size"
           clearable
           style="width: 160px"
         />
@@ -26,14 +26,14 @@
           :code="field.refLovCode"
           v-model="searchParams[field.field]"
           :placeholder="field.title"
-          size="small"
+          :size="size"
           clearable
         />
         <el-select
           v-else-if="field.componentType === 'select'"
           v-model="searchParams[field.field]"
           :placeholder="field.title"
-          size="small"
+          :size="size"
           clearable
           style="width: 160px"
         >
@@ -43,12 +43,12 @@
           v-else-if="field.componentType === 'datepicker'"
           v-model="searchParams[field.field]"
           :placeholder="field.title"
-          size="small"
+          :size="size"
           style="width: 160px"
         />
       </template>
-      <el-button type="primary" size="small" @click="searchData">搜索</el-button>
-      <el-button size="small" @click="resetSearch">重置</el-button>
+      <el-button type="primary" :size="size" @click="searchData">{{ t('button.search') }}</el-button>
+      <el-button :size="size" @click="resetSearch">{{ t('button.reset') }}</el-button>
     </div>
 
     <!-- 数据表格 -->
@@ -60,6 +60,8 @@
       :row-key="getRowKey"
       :highlight-current-row="!multiple"
       :row-class-name="rowClassName"
+      :height="height"
+      :size="size"
       style="width: 100%"
       @row-click="selectRow"
       @selection-change="onSelectionChange"
@@ -79,7 +81,7 @@
         :key="col.field"
         :prop="col.field"
         :label="col.title"
-        :width="col.width || undefined"
+        :min-width="col.width || 120"
         :align="col.align || 'left'"
       >
         <template #default="{ row }">
@@ -95,6 +97,7 @@
         v-model:page-size="pageSize"
         :total="total"
         :page-sizes="[10, 20, 50, 100]"
+        :size="size"
         layout="total, sizes, prev, pager, next, jumper"
         @current-change="fetchListData"
         @size-change="
@@ -108,10 +111,10 @@
 
     <template #footer>
       <div class="lst-footer">
-        <span class="lst-selected-count">已选 {{ selectedCountText }}</span>
+        <span class="lst-selected-count">{{ t('lov.selectedCount', { count: selectedCountText }) }}</span>
         <span class="lst-footer-buttons">
-          <el-button @click="$emit('update:dialogVisible', false)">取消</el-button>
-          <el-button v-if="multiple" type="primary" @click="confirmMulti">确定</el-button>
+          <el-button :size="size" @click="$emit('update:dialogVisible', false)">{{ t('button.cancel') }}</el-button>
+          <el-button v-if="multiple" type="primary" :size="size" @click="confirmMulti">{{ t('button.confirm') }}</el-button>
         </span>
       </div>
     </template>
@@ -122,6 +125,7 @@
 // 显式声明组件名，确保 Vue DevTools 显示为 LovSelectTable（不依赖目录/文件名推断）
 defineOptions({ name: 'LovSelectTable' });
 import { ref, watch, computed, nextTick, defineAsyncComponent } from 'vue';
+import { useI18n } from 'vue-i18n';
 // 用异步组件打破与 LovSelect 的循环依赖：LovSelect 静态 import 本组件用于 LIST 弹窗，
 // 本组件又需要 LovSelect 作为嵌套 lov 搜索控件。若双方都静态 import，会形成循环依赖，
 // 导致 Vite eager glob 在收集 story 时漏掉「先加载一方」的 stories 导出，使 LovSelect 的 CT story 无法注册。
@@ -143,7 +147,7 @@ import type {
   LovTableColumn,
 } from '@newlifex/cube-vue/core/types/lov';
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   dialogVisible: boolean;
   lovCode: string;
   lovMeta: LovListMeta | null;
@@ -151,15 +155,27 @@ const props = defineProps<{
   translateCache: Map<string, string>;
   /** 是否多选（multipleSelect 场景），确定后 emit string[] */
   multiple?: boolean;
-  /** 当前已选值（单选为单个值，多选为逗号分隔字符串或 string[]），弹窗打开时用于回显已选 */
-  modelValue?: string | number | string[] | undefined;
-}>();
+  /** 当前已选值（单选为单个值，多选为逗号分隔字符串或 string[]/number[]），弹窗打开时用于回显已选 */
+  modelValue?: string | number | Array<string | number> | undefined;
+  /** 每页条数，默认 10 */
+  pageSize?: number;
+  /** 弹窗宽度，默认 680px */
+  width?: string | number;
+  /** 表格高度（固定表头 + 内容滚动），不设置则随内容自适应 */
+  height?: string | number;
+  /** 弹窗内控件尺寸（搜索栏/表格/分页/按钮），默认 default */
+  size?: 'large' | 'default' | 'small';
+}>(), {
+  size: 'default',
+});
 
 const emit = defineEmits<{
   (e: 'update:dialogVisible', value: boolean): void;
   (e: 'select', row: Record<string, unknown>): void;
   (e: 'confirm', values: string[]): void;
 }>();
+
+const { t } = useI18n();
 
 /** el-table 实例引用（用于回显多选勾选状态） */
 const tableRef = ref<unknown>(null);
@@ -179,7 +195,7 @@ const restoringSelection = ref(false);
 const currentValue = ref<string | number | undefined>('');
 
 /** 将已存储值归一为 string[]（多选逗号分隔字符串 / 数组 / 单选单值） */
-function toValueArray(val?: string | number | string[] | null): string[] {
+function toValueArray(val?: string | number | Array<string | number> | null): string[] {
   if (val == null) return [];
   if (Array.isArray(val)) return val.map(String);
   if (typeof val === 'number') return [String(val)];
@@ -199,13 +215,18 @@ const tableLoading = ref(false);
 const searchParams = ref<Record<string, string | number | undefined>>({});
 const tableData = ref<Record<string, unknown>[]>([]);
 const currentPage = ref(1);
-const pageSize = ref(20);
+// 每页条数：由父组件 pageSize 参数控制，未设置时默认 10
+const pageSize = ref(props.pageSize ?? 10);
 const total = ref(0);
 
 /** 弹窗底部「已选统计」文本（右下角展示） */
 const selectedCountText = computed(() => {
-  if (props.multiple) return `${selectedValues.value.length} 项`;
-  return currentValue.value != null && String(currentValue.value) !== '' ? '1 项' : '0 项';
+  const count = props.multiple
+    ? selectedValues.value.length
+    : currentValue.value != null && String(currentValue.value) !== ''
+      ? 1
+      : 0;
+  return t('lov.itemCount', { count });
 });
 
 /** 行唯一键（reserve-selection 跨页保留勾选所需） */
@@ -329,7 +350,7 @@ async function fetchListData() {
       await Promise.all(tasks);
     }
   } catch (err) {
-    console.error('LovSelectTable: 获取列表数据失败', err);
+    console.error('LovSelectTable: failed to load list data', err);
   } finally {
     tableLoading.value = false;
   }

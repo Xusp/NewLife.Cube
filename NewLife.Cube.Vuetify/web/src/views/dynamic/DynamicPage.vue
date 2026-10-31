@@ -1,7 +1,7 @@
 <template>
   <div>
-    <!-- ECharts 图表区域 -->
-    <v-card v-if="chartList.length" class="mb-4 pa-4">
+    <!-- ECharts 图表区域（图表视图） -->
+    <v-card v-if="viewMode === 'chart' && chartList.length" class="mb-4 pa-4">
       <div
         v-for="(_, idx) in chartList"
         :key="idx"
@@ -9,6 +9,12 @@
         style="width: 100%; height: 400px"
       />
     </v-card>
+    <v-empty-state
+      v-else-if="viewMode === 'chart'"
+      class="mb-4"
+      icon="mdi-chart-box-outline"
+      title="暂无图表"
+    />
 
     <!-- 搜索 -->
     <v-card v-if="searchFields.length" class="mb-4 pa-4">
@@ -30,6 +36,7 @@
       <div class="d-flex ga-2">
         <v-btn v-if="canAdd" color="primary" prepend-icon="mdi-plus" @click="handleAdd">新增</v-btn>
         <v-btn v-if="canDelete" color="error" :disabled="!selected.length" prepend-icon="mdi-delete" @click="handleBatchDelete">批量删除</v-btn>
+        <v-btn variant="tonal" @click="toggleView">{{ viewMode === 'table' ? '图表' : '表格' }}</v-btn>
       </div>
       <div class="d-flex ga-2">
         <v-menu v-if="canExport">
@@ -49,6 +56,7 @@
 
     <!-- 数据表格 -->
     <v-data-table
+      v-show="viewMode === 'table'"
       :headers="headers"
       :items="tableData"
       :loading="loading"
@@ -83,6 +91,7 @@
       <v-card>
         <v-card-title>{{ isEdit ? '编辑' : '新增' }}</v-card-title>
         <v-card-text>
+          <v-alert v-if="formError" type="error" density="compact" class="mb-3">{{ formError }}</v-alert>
           <v-form>
             <v-row dense>
               <v-col v-for="field in formFields" :key="field.name" cols="12">
@@ -138,7 +147,9 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick, markRaw } from 'vue';
 import { useRoute } from 'vue-router';
-import { Auth, type DataField } from '@newlifex/api-core';
+import { Auth, type DataField } from '@newlifex/cube';
+import { resolveColumnWidth, resolveColumnAlign } from '@newlifex/cube';
+import { normalizeChartList, shouldDisposeCharts, toggleListView, validateRequiredFields } from '@newlifex/cube';
 import * as echarts from 'echarts';
 import cubeApi from '@/api';
 import { useUserStore } from '@/stores/user';
@@ -188,6 +199,7 @@ const searchForm = reactive<Record<string, any>>({});
 const formDialogVisible = ref(false);
 const isEdit = ref(false);
 const formData = reactive<Record<string, any>>({});
+const formError = ref('');
 const submitLoading = ref(false);
 
 // 详情弹窗
@@ -205,7 +217,30 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const chartList = ref<any[]>([]);
 const chartInstances = ref<any[]>([]);
 
+/** 视图模式：表格 / 图表 */
+const viewMode = ref<'table' | 'chart'>('table');
+
+function toggleView() {
+  viewMode.value = toggleListView(viewMode.value);
+}
+
+// 离开图表视图时释放实例，避免隐藏容器尺寸为 0 导致图表错位
+watch(viewMode, (mode) => {
+  if (!shouldDisposeCharts(mode)) return;
+  for (const inst of chartInstances.value) {
+    inst?.dispose();
+  }
+  chartInstances.value = [];
+});
+
 // 表头
+/** Vuetify 3 的列对齐取 start/center/end，与统一规范的 left/center/right 互转 */
+function vuetifyAlign(align: 'left' | 'center' | 'right'): 'start' | 'center' | 'end' {
+  if (align === 'right') return 'end';
+  if (align === 'center') return 'center';
+  return 'start';
+}
+
 const headers = computed(() => {
   const cols = listFields.value
     .filter((f) => f.visible !== false)
@@ -213,8 +248,10 @@ const headers = computed(() => {
       title: f.displayName || f.name,
       key: f.name,
       sortable: false,
+      width: resolveColumnWidth(f),
+      align: vuetifyAlign(resolveColumnAlign(f)),
     }));
-  cols.push({ title: '操作', key: 'actions', sortable: false });
+  cols.push({ title: '操作', key: 'actions', sortable: false, width: 180, align: 'end' });
   return cols;
 });
 
@@ -250,7 +287,7 @@ async function loadData() {
 async function loadChartData() {
   try {
     const res = await cubeApi.page.getChartData(typePath.value);
-    chartList.value = Array.isArray(res.data) && res.data.length > 0 ? res.data : [];
+    chartList.value = normalizeChartList(res.data);
   } catch {
     chartList.value = [];
   }
@@ -273,10 +310,16 @@ function onChartResize() {
 function handleSearch() { page.value = 1; loadData(); }
 function handleReset() { Object.keys(searchForm).forEach((k) => delete searchForm[k]); page.value = 1; loadData(); }
 
-function handleAdd() { isEdit.value = false; Object.keys(formData).forEach((k) => delete formData[k]); formDialogVisible.value = true; }
-function handleEdit(row: Record<string, any>) { isEdit.value = true; Object.keys(formData).forEach((k) => delete formData[k]); Object.assign(formData, row); formDialogVisible.value = true; }
+function handleAdd() { isEdit.value = false; Object.keys(formData).forEach((k) => delete formData[k]); formError.value = ''; formDialogVisible.value = true; }
+function handleEdit(row: Record<string, any>) { isEdit.value = true; Object.keys(formData).forEach((k) => delete formData[k]); Object.assign(formData, row); formError.value = ''; formDialogVisible.value = true; }
 
 async function handleFormSubmit() {
+  const invalid = validateRequiredFields(formFields.value as any, formData);
+  if (invalid.length) {
+    formError.value = invalid.map((e) => e.message).join('；');
+    return;
+  }
+  formError.value = '';
   submitLoading.value = true;
   try {
     if (isEdit.value) await cubeApi.page.update(typePath.value, formData);

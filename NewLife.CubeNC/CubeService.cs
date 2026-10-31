@@ -51,7 +51,7 @@ public static class CubeService
 
         using var span = DefaultTracer.Instance?.NewSpan(nameof(AddCube));
 
-        XTrace.WriteLine("{0} Start 配置魔方 {0}", new String('=', 32));
+        XTrace.WriteLine(L.TLog("{0} Start configure Cube {0}", new String('=', 32)));
         Assembly.GetExecutingAssembly().WriteVersion();
 
         // 修正系统名，确保可运行
@@ -101,6 +101,9 @@ public static class CubeService
         var set = CubeSetting.Current;
         services.AddSingleton(set);
 
+        // 请求级多语言：?lang= / Cookie / Accept-Language，缺省跟随系统
+        services.AddCubeLocalization();
+
         // 租户上下文。封装静态 AsyncLocal 的无状态门面，注册为 Singleton 以避免被 Singleton 服务（如 UserService）捕获 scoped 依赖；租户状态本身由 AsyncLocal 按请求隔离
         services.AddSingleton<ITenantContext, TenantContextService>();
 
@@ -113,11 +116,16 @@ public static class CubeService
             .AllowCredentials()
             .SetIsOriginAllowed(hostname => true)));
         else if (!set.CorsOrigins.IsNullOrEmpty())
-            services.AddCors(options => options.AddPolicy("cube_cors", builder => builder
-            .AllowAnyMethod()
-            .AllowAnyHeader()
-            .AllowCredentials()
-            .WithOrigins(set.CorsOrigins)));
+        {
+            // 支持逗号/分号分隔的多个来源，逐项放行。整串作为一个来源会导致多来源配置永远匹配不上
+            var origins = set.CorsOrigins.Split(",", ";").Select(e => e.Trim()).Where(e => e.Length > 0).ToArray();
+            if (origins.Length > 0)
+                services.AddCors(options => options.AddPolicy("cube_cors", builder => builder
+                .AllowAnyMethod()
+                .AllowAnyHeader()
+                .AllowCredentials()
+                .WithOrigins(origins)));
+        }
 
         services.Configure<MvcOptions>(options =>
         {
@@ -227,15 +235,15 @@ public static class CubeService
         var modules = moduleManager.LoadAll(services);
         if (modules.Count > 0)
         {
-            XTrace.WriteLine("加载功能插件[{0}]个", modules.Count);
+            XTrace.WriteLine(L.TLog("Loaded [{0}] feature plugins", modules.Count));
             foreach (var item in modules)
             {
-                XTrace.WriteLine("加载插件：{0}", item.Key);
+                XTrace.WriteLine(L.TLog("Load plugin: {0}", item.Key));
                 item.Value.Add(services);
             }
         }
 
-        XTrace.WriteLine("{0} End   配置魔方 {0}", new String('=', 32));
+        XTrace.WriteLine(L.TLog("{0} End   configure Cube {0}", new String('=', 32)));
 
         return services;
     }
@@ -289,7 +297,7 @@ public static class CubeService
 
         foreach (var asm in list)
         {
-            XTrace.WriteLine("注册区域视图程序集：{0}", asm.FullName);
+            XTrace.WriteLine(L.TLog("Register area view assembly: {0}", asm.FullName));
 
             var factory = ApplicationPartFactory.GetApplicationPartFactory(asm);
             foreach (var part in factory.GetApplicationParts(asm))
@@ -324,7 +332,7 @@ public static class CubeService
             }
             catch (Exception ex)
             {
-                XTrace.WriteLine("在[{0}]中扫描视图报错：{1}", asm.GetName().Name, ex.Message);
+                XTrace.WriteLine(L.TLog("Error scanning views in [{0}]: {1}", asm.GetName().Name, ex.Message));
             }
         });
         var list = bag.ToList();
@@ -378,7 +386,7 @@ public static class CubeService
         var provider = app.ApplicationServices;
         using var span = DefaultTracer.Instance?.NewSpan(nameof(UseCube));
 
-        XTrace.WriteLine("{0} Start 初始化魔方 {0}", new String('=', 32));
+        XTrace.WriteLine(L.TLog("{0} Start initialize Cube {0}", new String('=', 32)));
 
         // 初始化数据库连接
         var set = CubeSetting.Current;
@@ -423,6 +431,9 @@ public static class CubeService
         // 配置静态Http上下文访问器
         app.UseStaticHttpContext();
 
+        // 请求级语言识别，必须早于任何产生用户可见消息的中间件
+        app.UseCubeLocalization();
+
         // API 前缀重写：配置了前缀的请求自动去掉前缀，转发到真实路由
         // 必须放在静态文件/鉴权/路由之前，保证后续管道看到的是去前缀后的路径
         if (!set.ApiPrefixes.IsNullOrWhiteSpace())
@@ -452,7 +463,7 @@ public static class CubeService
         // 设置默认路由。如果外部已经执行 UseRouting，则直接注册
         app.UseRouter(endpoints =>
         {
-            XTrace.WriteLine("注册魔方区域路由");
+            XTrace.WriteLine(L.TLog("Register Cube area routes"));
 
             endpoints.MapControllerRoute(
                 "CubeAreas",
@@ -470,15 +481,15 @@ public static class CubeService
         var modules = moduleManager.LoadAll();
         if (modules.Count > 0)
         {
-            XTrace.WriteLine("启用功能插件[{0}]个", modules.Count);
+            XTrace.WriteLine(L.TLog("Enabled [{0}] feature plugins", modules.Count));
             foreach (var item in modules)
             {
-                XTrace.WriteLine("启用插件：{0}", item.Key);
+                XTrace.WriteLine(L.TLog("Enable plugin: {0}", item.Key));
                 item.Value.Use(app, env);
             }
         }
 
-        XTrace.WriteLine("{0} End   初始化魔方 {0}", new String('=', 32));
+        XTrace.WriteLine(L.TLog("{0} End   initialize Cube {0}", new String('=', 32)));
 
         Task.Factory.StartNew(() => ResolveStarWeb(provider), TaskCreationOptions.LongRunning);
 
@@ -487,7 +498,7 @@ public static class CubeService
         {
             NewLife.Model.Host.RegisterExit(() =>
             {
-                XTrace.WriteLine("魔方优雅退出！");
+                XTrace.WriteLine(L.TLog("Cube shut down gracefully!"));
                 web.StopAsync().Wait(5_000);
             });
         }
@@ -503,16 +514,16 @@ public static class CubeService
             var tables = dal.Tables;
             if (tables != null && !tables.Any(e => e.TableName.EqualIgnoreCase("OAuthApp")))
             {
-                XTrace.WriteLine("未发现OAuth应用新表 OAuthApp");
+                XTrace.WriteLine(L.TLog("New OAuth app table OAuthApp not found"));
 
                 // 验证表名和部分字段名，避免误改其它表
                 var dt = tables.FirstOrDefault(e => e.TableName.EqualIgnoreCase("App"));
                 if (dt != null && dt.Columns.Any(e => e.ColumnName.EqualIgnoreCase("RoleIds")))
                 {
-                    XTrace.WriteLine("发现OAuth应用旧表 App ，准备重命名");
+                    XTrace.WriteLine(L.TLog("Legacy OAuth app table App found, preparing to rename"));
 
                     var rs = dal.Execute($"Alter Table App Rename To OAuthApp");
-                    XTrace.WriteLine("重命名结果：{0}", rs);
+                    XTrace.WriteLine(L.TLog("Rename result: {0}", rs));
                 }
             }
         }
@@ -551,7 +562,7 @@ public static class CubeService
                 var dfile = dst.FullName.CombinePath(name);
                 if (!File.Exists(dfile))
                 {
-                    XTrace.WriteLine("移动 {0}", name);
+                    XTrace.WriteLine(L.TLog("Move {0}", name));
                     item.MoveTo(dfile.EnsureDirectory(true), false);
                 }
                 else

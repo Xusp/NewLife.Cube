@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
+import { NzAlertModule } from 'ng-zorro-antd/alert';
 import { NzTableModule } from 'ng-zorro-antd/table';
 import { NzButtonModule } from 'ng-zorro-antd/button';
 import { NzCardModule } from 'ng-zorro-antd/card';
@@ -16,7 +17,10 @@ import { NzSpaceModule } from 'ng-zorro-antd/space';
 import { NzIconModule } from 'ng-zorro-antd/icon';
 import { NzDividerModule } from 'ng-zorro-antd/divider';
 import { NzDropDownModule } from 'ng-zorro-antd/dropdown';
-import { FieldKind, Auth, type DataField } from '@newlifex/api-core';
+import { NzEmptyModule } from 'ng-zorro-antd/empty';
+import { Auth, type DataField } from '@newlifex/cube';
+import { resolveColumnWidth, resolveColumnAlign } from '@newlifex/cube';
+import { normalizeChartList, toggleListView, validateRequiredFields } from '@newlifex/cube';
 import { ApiService } from '../../services/api.service';
 import { UserService } from '../../services/user.service';
 import { FieldInputComponent } from '../../components/field-input.component';
@@ -26,20 +30,23 @@ import * as echarts from 'echarts';
   selector: 'app-dynamic-page',
   standalone: true,
   imports: [
-    CommonModule, FormsModule,
+    CommonModule, FormsModule, NzAlertModule,
     NzTableModule, NzButtonModule, NzCardModule, NzFormModule,
     NzModalModule, NzDescriptionsModule, NzPopconfirmModule,
     NzUploadModule, NzSpaceModule, NzIconModule, NzDividerModule,
-    NzDropDownModule, FieldInputComponent,
+    NzDropDownModule, NzEmptyModule, FieldInputComponent,
   ],
   template: `
-    <!-- ECharts 图表 -->
-    @if (chartList.length) {
+    <!-- ECharts 图表（图表视图） -->
+    @if (viewMode === 'chart' && chartList.length) {
       <nz-card style="margin-bottom: 16px;">
         @for (opt of chartList; track $index) {
           <div #chartContainer style="width: 100%; height: 400px;"></div>
         }
       </nz-card>
+    }
+    @if (viewMode === 'chart' && !chartList.length) {
+      <nz-empty nzNotFoundContent="暂无图表" style="margin-bottom: 16px"></nz-empty>
     }
 
     <!-- 搜索 -->
@@ -95,22 +102,25 @@ import * as echarts from 'echarts';
           </nz-dropdown-menu>
         }
         @if (canImport) {
-          <nz-upload *nzSpaceItem [nzAction]="typePath + '/ImportFile'" [nzShowUploadList]="false" (nzChange)="onImportChange($event)">
+          <nz-upload *nzSpaceItem [nzAction]="typePath + '/import'" [nzShowUploadList]="false" (nzChange)="onImportChange($event)">
             <button nz-button><span nz-icon nzType="upload"></span>导入</button>
           </nz-upload>
         }
+        <button *nzSpaceItem nz-button (click)="toggleView()">{{ viewMode === 'table' ? '图表' : '表格' }}</button>
       </nz-space>
     </div>
 
     <!-- 数据表格 -->
     <nz-table
       #basicTable
+      [style.display]="viewMode === 'table' ? null : 'none'"
       [nzData]="tableData"
       [nzLoading]="loading"
       [nzPageIndex]="pageIndex"
       [nzPageSize]="pageSize"
       [nzTotal]="total"
       [nzFrontPagination]="false"
+      [nzScroll]="{ x: tableScrollX }"
       nzShowSizeChanger
       (nzPageIndexChange)="onPageChange($event)"
       (nzPageSizeChange)="onPageSizeChange($event)"
@@ -120,7 +130,7 @@ import * as echarts from 'echarts';
           <th nzShowCheckbox [(nzChecked)]="allChecked" (nzCheckedChange)="onAllChecked($event)"></th>
           @for (field of listFields; track field.name) {
             @if (field.visible !== false) {
-              <th>{{ field.displayName || field.name }}</th>
+              <th [nzWidth]="columnWidthPx(field)" [style.text-align]="columnAlign(field)">{{ field.displayName || field.name }}</th>
             }
           }
           <th nzWidth="180px">操作</th>
@@ -132,7 +142,7 @@ import * as echarts from 'echarts';
             <td nzShowCheckbox [nzChecked]="checkedIds.has(row['id'])" (nzCheckedChange)="onItemChecked(row['id'], $event)"></td>
             @for (field of listFields; track field.name) {
               @if (field.visible !== false) {
-                <td>{{ row[field.name] }}</td>
+                <td [style.text-align]="columnAlign(field)">{{ row[field.name] }}</td>
               }
             }
             <td>
@@ -166,6 +176,9 @@ import * as echarts from 'echarts';
     <!-- 新增/编辑弹窗 -->
     <nz-modal [(nzVisible)]="formVisible" [nzTitle]="isEdit ? '编辑' : '新增'" nzWidth="640" (nzOnOk)="handleFormSubmit()" [nzOkLoading]="submitLoading">
       <ng-container *nzModalContent>
+        @if (formError) {
+          <nz-alert nzType="error" [nzMessage]="formError" nzShowIcon style="margin-bottom: 12px" />
+        }
         <form nz-form nzLayout="vertical">
           @for (field of formFields; track field.name) {
             <nz-form-item>
@@ -220,6 +233,7 @@ export class DynamicPageComponent implements OnInit, OnDestroy, AfterViewChecked
   isEdit = false;
   formData: Record<string, any> = {};
   submitLoading = false;
+  formError = '';
 
   detailVisible = false;
   detailData: Record<string, any> = {};
@@ -233,9 +247,36 @@ export class DynamicPageComponent implements OnInit, OnDestroy, AfterViewChecked
 
   // ECharts
   chartList: any[] = [];
+  /** 视图模式：表格 / 图表 */
+  viewMode: 'table' | 'chart' = 'table';
   private chartInstances: any[] = [];
   private chartsInitialized = false;
   private resizeHandler = () => { for (const inst of this.chartInstances) { inst?.resize(); } };
+
+  /** 表格横向滚动宽度：固定列按实际宽度，自适应列按 140px 估算，末尾预留操作列 */
+  get tableScrollX(): string {
+    const total = this.listFields
+      .filter((field) => field.visible !== false)
+      .reduce((sum, field) => sum + (resolveColumnWidth(field) ?? 140), 0);
+    return `${total + 230}px`;
+  }
+
+  /** 切换表格/图表视图。回到表格时释放图表实例，避免隐藏容器尺寸为 0 */
+  toggleView() {
+    this.viewMode = toggleListView(this.viewMode);
+    if (this.viewMode === 'table') this.disposeCharts();
+  }
+
+  /** 列宽（像素字符串）。null 交给表格自适应 */
+  columnWidthPx(field: DataField): string | null {
+    const width = resolveColumnWidth(field);
+    return width ? `${width}px` : null;
+  }
+
+  /** 列对齐，统一左/中/右 */
+  columnAlign(field: DataField): 'left' | 'center' | 'right' {
+    return resolveColumnAlign(field);
+  }
 
   exportOptions = [
     { label: '导出 Excel', value: 'Excel' },
@@ -312,7 +353,7 @@ export class DynamicPageComponent implements OnInit, OnDestroy, AfterViewChecked
   async loadChartData() {
     try {
       const res = await this.api.page.getChartData(this.typePath);
-      this.chartList = Array.isArray(res.data) && res.data.length > 0 ? res.data : [];
+      this.chartList = normalizeChartList(res.data);
       this.chartsInitialized = false;
     } catch {
       this.chartList = [];
@@ -320,19 +361,14 @@ export class DynamicPageComponent implements OnInit, OnDestroy, AfterViewChecked
   }
 
   async loadFields() {
-    const path = this.typePath;
-    const [list, search, add, edit, detail] = await Promise.all([
-      this.api.page.getFields(path, FieldKind.List),
-      this.api.page.getFields(path, FieldKind.Search),
-      this.api.page.getFields(path, FieldKind.Add),
-      this.api.page.getFields(path, FieldKind.Edit),
-      this.api.page.getFields(path, FieldKind.Detail),
-    ]);
-    this.listFields = list.data || [];
-    this.searchFields = search.data || [];
-    this.addFields = add.data || [];
-    this.editFields = edit.data || [];
-    this.detailFields = detail.data || [];
+    // meta 一次返回全部视图字段；api-core 已把 v2 的字段表 + 视图差异展开为旧结构
+    const res = await this.api.page.getPage(this.typePath);
+    const meta = res.data;
+    this.listFields = meta?.list ?? [];
+    this.searchFields = meta?.search ?? [];
+    this.addFields = meta?.addForm ?? [];
+    this.editFields = meta?.editForm ?? [];
+    this.detailFields = meta?.detail ?? [];
   }
 
   async loadData() {
@@ -390,16 +426,24 @@ export class DynamicPageComponent implements OnInit, OnDestroy, AfterViewChecked
   handleAdd() {
     this.isEdit = false;
     this.formData = {};
+    this.formError = '';
     this.formVisible = true;
   }
 
   handleEdit(row: Record<string, any>) {
     this.isEdit = true;
     this.formData = { ...row };
+    this.formError = '';
     this.formVisible = true;
   }
 
   async handleFormSubmit() {
+    const invalid = validateRequiredFields(this.formFields, this.formData);
+    if (invalid.length) {
+      this.formError = invalid.map((e) => e.message).join('；');
+      return;
+    }
+    this.formError = '';
     this.submitLoading = true;
     try {
       if (this.isEdit) {

@@ -76,7 +76,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { WidgetInstance } from '@newlifex/api-core';
+import type { WidgetInstance } from '@newlifex/cube';
 import WidgetGrid from './WidgetGrid.vue';
 import WidgetConfigDrawer from './WidgetConfigDrawer.vue';
 import { isFixedDeveloperChart } from '@/core/utils/chartOptions';
